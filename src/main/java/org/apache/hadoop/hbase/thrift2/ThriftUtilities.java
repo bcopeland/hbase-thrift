@@ -107,11 +107,12 @@ public class ThriftUtilities {
     // Map<family, Map<qualifier, Map<timestamp, value>>>
     for (Map.Entry<byte[], NavigableMap<byte[], NavigableMap<Long, byte[]>>> family : in.getMap().entrySet()) {
       for (Map.Entry<byte[], NavigableMap<Long, byte[]>> qualifier : family.getValue().entrySet()) {
-        for (Map.Entry<Long, byte[]> timestamp : qualifier.getValue().entrySet()) {
+        for (Map.Entry<Long, byte[]> entry : qualifier.getValue().entrySet()) {
           TColumnValue col = new TColumnValue();
           col.setFamily(family.getKey());
           col.setQualifier(qualifier.getKey());
-          col.setTimestamp(timestamp.getKey());
+          col.setTimestamp(entry.getKey());
+          col.setValue(entry.getValue());
           values.add(col);
         }
       }
