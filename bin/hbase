@@ -72,7 +72,8 @@ if [ $# = 0 ]; then
   echo "  regionserver     run an HBase HRegionServer node" 
   echo "  zookeeper        run a Zookeeper server"
   echo "  rest             run an HBase REST server" 
-  echo "  thrift           run an HBase Thrift server" 
+  echo "  thrift           run the old HBase Thrift server" 
+  echo "  thrift2          run the new HBase Thrift server" 
   echo "  avro             run an HBase Avro server" 
   echo "  migrate          upgrade an hbase.rootdir"
   echo "  hbck             run the hbase 'fsck' tool"
@@ -232,6 +233,11 @@ elif [ "$COMMAND" = "regionserver" ] ; then
   fi
 elif [ "$COMMAND" = "thrift" ] ; then
   CLASS='org.apache.hadoop.hbase.thrift.ThriftServer'
+  if [ "$1" != "stop" ] ; then
+    HBASE_OPTS="$HBASE_OPTS $HBASE_THRIFT_OPTS"
+  fi
+elif [ "$COMMAND" = "thrift2" ] ; then
+  CLASS='org.apache.hadoop.hbase.thrift2.ThriftServer'
   if [ "$1" != "stop" ] ; then
     HBASE_OPTS="$HBASE_OPTS $HBASE_THRIFT_OPTS"
   fi

@@ -44,7 +44,7 @@ public class TestThriftServer {
   private static byte[] valueDname = Bytes.toBytes("valueD");
 
 
-  private HBaseTestingUtility hbaseTestingUtility;
+  private ThriftServer thriftServer;
 
   /**
    * Runs all of the tests under a single JUnit test method.  We 
@@ -65,8 +65,7 @@ public class TestThriftServer {
 
   @Before
   public void setUp() throws Exception {
-    hbaseTestingUtility = new HBaseTestingUtility();
-    hbaseTestingUtility.startMiniCluster();
+    thriftServer = new ThriftServer();
   }
 
   /**
@@ -78,7 +77,7 @@ public class TestThriftServer {
    */
   @Test
   public void doTestTableCreateDrop() throws Exception {
-    ThriftServer.HBaseHandler handler = new ThriftServer.HBaseHandler();
+    ThriftHBaseServiceHandler handler = new ThriftHBaseServiceHandler();
 
     // Create/enable/disable/delete tables, ensure methods act correctly
     assertTrue(handler.isMasterRunning());

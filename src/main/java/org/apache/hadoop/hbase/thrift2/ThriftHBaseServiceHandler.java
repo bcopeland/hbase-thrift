@@ -1,14 +1,22 @@
 package org.apache.hadoop.hbase.thrift2;
 
+import static org.apache.hadoop.hbase.thrift2.ThriftUtilities.*;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.HTablePool;
 import org.apache.hadoop.hbase.client.ResultScanner;
-import org.apache.hadoop.hbase.thrift2.generated.*;
+import org.apache.hadoop.hbase.thrift2.generated.TDelete;
+import org.apache.hadoop.hbase.thrift2.generated.TGet;
+import org.apache.hadoop.hbase.thrift2.generated.THBaseService;
+import org.apache.hadoop.hbase.thrift2.generated.TIOError;
+import org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument;
+import org.apache.hadoop.hbase.thrift2.generated.TPut;
+import org.apache.hadoop.hbase.thrift2.generated.TResult;
+import org.apache.hadoop.hbase.thrift2.generated.TScan;
 import org.apache.thrift.TException;
-import org.omg.PortableServer.THREAD_POLICY_ID;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -16,8 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import static org.apache.hadoop.hbase.thrift2.ThriftUtilities.*;
 
 /**
  * This class is a glue object that connects Thrift RPC calls to the HBase client API primarily defined in the

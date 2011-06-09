@@ -28,6 +28,7 @@ import org.apache.commons.cli.PosixParser;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.thrift2.generated.THBaseService;
+import org.apache.thrift.TProcessor;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TCompactProtocol;
 import org.apache.thrift.protocol.TProtocolFactory;
@@ -40,6 +41,7 @@ import org.apache.thrift.transport.TNonblockingServerSocket;
 import org.apache.thrift.transport.TNonblockingServerTransport;
 import org.apache.thrift.transport.TServerSocket;
 import org.apache.thrift.transport.TServerTransport;
+import org.apache.thrift.transport.TTransportException;
 import org.apache.thrift.transport.TTransportFactory;
 
 import java.net.InetAddress;
@@ -53,6 +55,7 @@ import java.util.List;
  * HbaseClient.thrift IDL file.
  */
 public class ThriftServer {
+  private static final Log log = LogFactory.getLog("ThriftServer");
 
   public ThriftServer() {
     throw new UnsupportedOperationException("Can't initialize class");
@@ -75,8 +78,6 @@ public class ThriftServer {
    * @param args
    */
   private static void doMain(String[] args) throws Exception {
-    Log log = LogFactory.getLog("ThriftServer");
-
     Options options = new Options();
     options.addOption("b", "bind", true,
         "Address to bind the Thrift server to. Not supported by the Nonblocking and HsHa server [default: 0.0.0.0]");
@@ -102,7 +103,17 @@ public class ThriftServer {
     List<String> commandLine = Arrays.asList(args);
     boolean stop = commandLine.contains("stop");
     boolean start = commandLine.contains("start");
-    if (cmd.hasOption("help") || !start || stop) {
+
+    String bindValue = cmd.getOptionValue("bind");
+    boolean framed = cmd.hasOption("framed");
+    boolean compact = cmd.hasOption("compact");
+    boolean bind = cmd.hasOption("bind");
+    boolean help = cmd.hasOption("help");
+
+    boolean nonblocking = cmd.hasOption("nonblocking");
+    boolean hsha = cmd.hasOption("hsha");
+
+    if (help || !start || stop) {
       printUsageAndExit(options, 1);
     }
 
@@ -116,22 +127,14 @@ public class ThriftServer {
     }
 
     // Construct correct ProtocolFactory
-    TProtocolFactory protocolFactory;
-    if (cmd.hasOption("compact")) {
-      log.debug("Using compact protocol");
-      protocolFactory = new TCompactProtocol.Factory();
-    } else {
-      log.debug("Using binary protocol");
-      protocolFactory = new TBinaryProtocol.Factory();
-    }
-
+    TProtocolFactory protocolFactory = getTProtocolFactory(compact);
     THBaseService.Iface handler = new ThriftHBaseServiceHandler();
     THBaseService.Processor processor = new THBaseService.Processor(handler);
 
     TServer server;
-    if (cmd.hasOption("nonblocking") || cmd.hasOption("hsha")) {
+    if (nonblocking || hsha) {
       // TODO: Remove once HBASE-2155 is resolved
-      if (cmd.hasOption("bind")) {
+      if (bind) {
         log.error("The Nonblocking and HsHa servers don't support IP address binding at the moment." +
                   " See https://issues.apache.org/jira/browse/HBASE-2155 for details.");
         printUsageAndExit(options, -1);
@@ -140,7 +143,7 @@ public class ThriftServer {
       TNonblockingServerTransport serverTransport = new TNonblockingServerSocket(listenPort);
       TFramedTransport.Factory transportFactory = new TFramedTransport.Factory();
 
-      if (cmd.hasOption("nonblocking")) {
+      if (nonblocking) {
         log.info("starting HBase Nonblocking Thrift server on " + Integer.toString(listenPort));
         TNonblockingServer.Args serverArgs = new TNonblockingServer.Args(serverTransport);
         serverArgs.processor(processor);
@@ -158,9 +161,9 @@ public class ThriftServer {
     } else {
       // Get IP address to bind to
       InetAddress listenAddress = null;
-      if (cmd.hasOption("bind")) {
+      if (bind) {
         try {
-          listenAddress = InetAddress.getByName(cmd.getOptionValue("bind"));
+          listenAddress = InetAddress.getByName(bindValue);
         } catch (UnknownHostException e) {
           log.error("Could not bind to provided ip address", e);
           printUsageAndExit(options, -1);
@@ -172,7 +175,7 @@ public class ThriftServer {
 
       // Construct correct TransportFactory
       TTransportFactory transportFactory;
-      if (cmd.hasOption("framed")) {
+      if (framed) {
         transportFactory = new TFramedTransport.Factory();
         log.debug("Using framed transport");
       } else {
@@ -188,6 +191,39 @@ public class ThriftServer {
     }
 
     server.serve();
+  }
+
+  private static TProtocolFactory getTProtocolFactory(boolean isCompact) {
+    // Construct correct ProtocolFactory
+    TProtocolFactory protocolFactory;
+    if (isCompact) {
+      log.debug("Using compact protocol");
+      protocolFactory = new TCompactProtocol.Factory();
+    } else {
+      log.debug("Using binary protocol");
+      protocolFactory = new TBinaryProtocol.Factory();
+    }
+    return protocolFactory;
+  }
+
+  private static TServer getTNonBlockingServer(TNonblockingServerTransport serverTransport, TProcessor processor,
+      TTransportFactory transportFactory, TProtocolFactory protocolFactory)
+      throws TTransportException {
+    TNonblockingServer.Args serverArgs = new TNonblockingServer.Args(serverTransport);
+    serverArgs.processor(processor);
+    serverArgs.transportFactory(transportFactory);
+    serverArgs.protocolFactory(protocolFactory);
+    return new TNonblockingServer(serverArgs);
+  }
+
+  private static TServer getTHsHaServer(TNonblockingServerTransport serverTransport, TProcessor processor,
+      TTransportFactory transportFactory, TProtocolFactory protocolFactory)
+      throws TTransportException {
+    THsHaServer.Args serverArgs = new THsHaServer.Args(serverTransport);
+    serverArgs.processor(processor);
+    serverArgs.transportFactory(transportFactory);
+    serverArgs.protocolFactory(protocolFactory);
+    return new THsHaServer(serverArgs);
   }
 
   public static void main(String[] args) throws Exception {
