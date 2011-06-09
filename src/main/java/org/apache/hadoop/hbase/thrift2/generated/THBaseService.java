@@ -20,7 +20,7 @@ import java.util.Arrays;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class HbaseClient {
+public class THBaseService {
 
   public interface Iface {
 
@@ -33,7 +33,7 @@ public class HbaseClient {
      * 
      * @param get the TGet to check for
      */
-    public boolean exists(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public boolean exists(ByteBuffer table, TGet get) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Method for getting data from a row.
@@ -47,7 +47,7 @@ public class HbaseClient {
      * 
      * @param get the TGet to fetch
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TResult get(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public TResult get(ByteBuffer table, TGet get) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Method for getting multiple rows.
@@ -64,7 +64,7 @@ public class HbaseClient {
      * will have the Results at corresponding positions
      * or null if there was an error
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> getMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public List<TResult> getMultiple(ByteBuffer table, List<TGet> gets) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Return the row that matches <i>row</i> exactly,
@@ -76,7 +76,7 @@ public class HbaseClient {
      * 
      * @param family the column family to get
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TResult getRowOrBefore(ByteBuffer table, ByteBuffer row, ByteBuffer family) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public TResult getRowOrBefore(ByteBuffer table, ByteBuffer row, ByteBuffer family) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Commit a TPut to a table.
@@ -85,7 +85,7 @@ public class HbaseClient {
      * 
      * @param put the TPut to put
      */
-    public void put(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TPut put) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public void put(ByteBuffer table, TPut put) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Atomically checks if a row/family/qualifier value matches the expected
@@ -107,7 +107,7 @@ public class HbaseClient {
      * 
      * @param put the TPut to put if the check succeeds
      */
-    public boolean checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TPut put) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public boolean checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TPut put) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Commit a List of Puts to the table.
@@ -116,7 +116,7 @@ public class HbaseClient {
      * 
      * @param puts a list of TPuts to commit
      */
-    public void putMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public void putMultiple(ByteBuffer table, List<TPut> puts) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Deletes as specified by the TDelete.
@@ -128,7 +128,7 @@ public class HbaseClient {
      * 
      * @param deleteSingle the TDelete to delete
      */
-    public void deleteSingle(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public void deleteSingle(ByteBuffer table, TDelete deleteSingle) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Bulk commit a List of TDeletes to the table.
@@ -141,7 +141,7 @@ public class HbaseClient {
      * 
      * @param deletes list of TDeletes to delete
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deleteMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public List<TDelete> deleteMultiple(ByteBuffer table, List<TDelete> deletes) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Atomically checks if a row/family/qualifier value matches the expected
@@ -163,7 +163,7 @@ public class HbaseClient {
      * 
      * @param deleteSingle the TDelete to execute if the check succeeds
      */
-    public boolean checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public boolean checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TDelete deleteSingle) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Atomically increments a single column by a user provided amount.
@@ -180,7 +180,7 @@ public class HbaseClient {
      * 
      * @param writeToWal if this increment should be written to the WAL or not
      */
-    public long incrementColumnValue(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, long amount, boolean writeToWal) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public long incrementColumnValue(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, long amount, boolean writeToWal) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Get a Scanner for the provided TScan object.
@@ -191,7 +191,7 @@ public class HbaseClient {
      * 
      * @param scan the scan object to get a Scanner for
      */
-    public int openScanner(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TScan scan) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException;
+    public int openScanner(ByteBuffer table, TScan scan) throws TIOError, org.apache.thrift.TException;
 
     /**
      * Grabs multiple rows from a Scanner.
@@ -202,7 +202,7 @@ public class HbaseClient {
      * 
      * @param numRows number of rows to return
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> getScannerRows(int scannerId, int numRows) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument, org.apache.thrift.TException;
+    public List<TResult> getScannerRows(int scannerId, int numRows) throws TIOError, TIllegalArgument, org.apache.thrift.TException;
 
     /**
      * Closes the scanner. Should be called if you need to close
@@ -212,35 +212,35 @@ public class HbaseClient {
      * 
      * @param scannerId the Id of the Scanner to close *
      */
-    public void closeScanner(int scannerId) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument, org.apache.thrift.TException;
+    public void closeScanner(int scannerId) throws TIOError, TIllegalArgument, org.apache.thrift.TException;
 
   }
 
   public interface AsyncIface {
 
-    public void exists(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.exists_call> resultHandler) throws org.apache.thrift.TException;
+    public void exists(ByteBuffer table, TGet get, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.exists_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void get(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.get_call> resultHandler) throws org.apache.thrift.TException;
+    public void get(ByteBuffer table, TGet get, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.get_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void getMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.getMultiple_call> resultHandler) throws org.apache.thrift.TException;
+    public void getMultiple(ByteBuffer table, List<TGet> gets, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.getMultiple_call> resultHandler) throws org.apache.thrift.TException;
 
     public void getRowOrBefore(ByteBuffer table, ByteBuffer row, ByteBuffer family, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.getRowOrBefore_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void put(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TPut put, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.put_call> resultHandler) throws org.apache.thrift.TException;
+    public void put(ByteBuffer table, TPut put, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.put_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TPut put, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.checkAndPut_call> resultHandler) throws org.apache.thrift.TException;
+    public void checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TPut put, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.checkAndPut_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void putMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.putMultiple_call> resultHandler) throws org.apache.thrift.TException;
+    public void putMultiple(ByteBuffer table, List<TPut> puts, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.putMultiple_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void deleteSingle(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.deleteSingle_call> resultHandler) throws org.apache.thrift.TException;
+    public void deleteSingle(ByteBuffer table, TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.deleteSingle_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void deleteMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.deleteMultiple_call> resultHandler) throws org.apache.thrift.TException;
+    public void deleteMultiple(ByteBuffer table, List<TDelete> deletes, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.deleteMultiple_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.checkAndDelete_call> resultHandler) throws org.apache.thrift.TException;
+    public void checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.checkAndDelete_call> resultHandler) throws org.apache.thrift.TException;
 
     public void incrementColumnValue(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, long amount, boolean writeToWal, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.incrementColumnValue_call> resultHandler) throws org.apache.thrift.TException;
 
-    public void openScanner(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TScan scan, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.openScanner_call> resultHandler) throws org.apache.thrift.TException;
+    public void openScanner(ByteBuffer table, TScan scan, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.openScanner_call> resultHandler) throws org.apache.thrift.TException;
 
     public void getScannerRows(int scannerId, int numRows, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.getScannerRows_call> resultHandler) throws org.apache.thrift.TException;
 
@@ -285,13 +285,13 @@ public class HbaseClient {
       return this.oprot_;
     }
 
-    public boolean exists(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public boolean exists(ByteBuffer table, TGet get) throws TIOError, org.apache.thrift.TException
     {
       send_exists(table, get);
       return recv_exists();
     }
 
-    public void send_exists(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get) throws org.apache.thrift.TException
+    public void send_exists(ByteBuffer table, TGet get) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("exists", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       exists_args args = new exists_args();
@@ -302,7 +302,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public boolean recv_exists() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public boolean recv_exists() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -325,13 +325,13 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "exists failed: unknown result");
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TResult get(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public TResult get(ByteBuffer table, TGet get) throws TIOError, org.apache.thrift.TException
     {
       send_get(table, get);
       return recv_get();
     }
 
-    public void send_get(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get) throws org.apache.thrift.TException
+    public void send_get(ByteBuffer table, TGet get) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("get", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       get_args args = new get_args();
@@ -342,7 +342,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TResult recv_get() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public TResult recv_get() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -365,13 +365,13 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "get failed: unknown result");
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> getMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public List<TResult> getMultiple(ByteBuffer table, List<TGet> gets) throws TIOError, org.apache.thrift.TException
     {
       send_getMultiple(table, gets);
       return recv_getMultiple();
     }
 
-    public void send_getMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets) throws org.apache.thrift.TException
+    public void send_getMultiple(ByteBuffer table, List<TGet> gets) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("getMultiple", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       getMultiple_args args = new getMultiple_args();
@@ -382,7 +382,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> recv_getMultiple() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public List<TResult> recv_getMultiple() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -405,7 +405,7 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "getMultiple failed: unknown result");
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TResult getRowOrBefore(ByteBuffer table, ByteBuffer row, ByteBuffer family) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public TResult getRowOrBefore(ByteBuffer table, ByteBuffer row, ByteBuffer family) throws TIOError, org.apache.thrift.TException
     {
       send_getRowOrBefore(table, row, family);
       return recv_getRowOrBefore();
@@ -423,7 +423,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TResult recv_getRowOrBefore() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public TResult recv_getRowOrBefore() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -446,13 +446,13 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "getRowOrBefore failed: unknown result");
     }
 
-    public void put(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TPut put) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public void put(ByteBuffer table, TPut put) throws TIOError, org.apache.thrift.TException
     {
       send_put(table, put);
       recv_put();
     }
 
-    public void send_put(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TPut put) throws org.apache.thrift.TException
+    public void send_put(ByteBuffer table, TPut put) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("put", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       put_args args = new put_args();
@@ -463,7 +463,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public void recv_put() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public void recv_put() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -483,13 +483,13 @@ public class HbaseClient {
       return;
     }
 
-    public boolean checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TPut put) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public boolean checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TPut put) throws TIOError, org.apache.thrift.TException
     {
       send_checkAndPut(table, row, family, qualifier, value, put);
       return recv_checkAndPut();
     }
 
-    public void send_checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TPut put) throws org.apache.thrift.TException
+    public void send_checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TPut put) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("checkAndPut", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       checkAndPut_args args = new checkAndPut_args();
@@ -504,7 +504,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public boolean recv_checkAndPut() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public boolean recv_checkAndPut() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -527,13 +527,13 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "checkAndPut failed: unknown result");
     }
 
-    public void putMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public void putMultiple(ByteBuffer table, List<TPut> puts) throws TIOError, org.apache.thrift.TException
     {
       send_putMultiple(table, puts);
       recv_putMultiple();
     }
 
-    public void send_putMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts) throws org.apache.thrift.TException
+    public void send_putMultiple(ByteBuffer table, List<TPut> puts) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("putMultiple", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       putMultiple_args args = new putMultiple_args();
@@ -544,7 +544,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public void recv_putMultiple() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public void recv_putMultiple() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -564,13 +564,13 @@ public class HbaseClient {
       return;
     }
 
-    public void deleteSingle(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public void deleteSingle(ByteBuffer table, TDelete deleteSingle) throws TIOError, org.apache.thrift.TException
     {
       send_deleteSingle(table, deleteSingle);
       recv_deleteSingle();
     }
 
-    public void send_deleteSingle(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle) throws org.apache.thrift.TException
+    public void send_deleteSingle(ByteBuffer table, TDelete deleteSingle) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("deleteSingle", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       deleteSingle_args args = new deleteSingle_args();
@@ -581,7 +581,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public void recv_deleteSingle() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public void recv_deleteSingle() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -601,13 +601,13 @@ public class HbaseClient {
       return;
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deleteMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public List<TDelete> deleteMultiple(ByteBuffer table, List<TDelete> deletes) throws TIOError, org.apache.thrift.TException
     {
       send_deleteMultiple(table, deletes);
       return recv_deleteMultiple();
     }
 
-    public void send_deleteMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes) throws org.apache.thrift.TException
+    public void send_deleteMultiple(ByteBuffer table, List<TDelete> deletes) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("deleteMultiple", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       deleteMultiple_args args = new deleteMultiple_args();
@@ -618,7 +618,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TDelete> recv_deleteMultiple() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public List<TDelete> recv_deleteMultiple() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -641,13 +641,13 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "deleteMultiple failed: unknown result");
     }
 
-    public boolean checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public boolean checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TDelete deleteSingle) throws TIOError, org.apache.thrift.TException
     {
       send_checkAndDelete(table, row, family, qualifier, value, deleteSingle);
       return recv_checkAndDelete();
     }
 
-    public void send_checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle) throws org.apache.thrift.TException
+    public void send_checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TDelete deleteSingle) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("checkAndDelete", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       checkAndDelete_args args = new checkAndDelete_args();
@@ -662,7 +662,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public boolean recv_checkAndDelete() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public boolean recv_checkAndDelete() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -685,7 +685,7 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "checkAndDelete failed: unknown result");
     }
 
-    public long incrementColumnValue(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, long amount, boolean writeToWal) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public long incrementColumnValue(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, long amount, boolean writeToWal) throws TIOError, org.apache.thrift.TException
     {
       send_incrementColumnValue(table, row, family, qualifier, amount, writeToWal);
       return recv_incrementColumnValue();
@@ -706,7 +706,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public long recv_incrementColumnValue() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public long recv_incrementColumnValue() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -729,13 +729,13 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "incrementColumnValue failed: unknown result");
     }
 
-    public int openScanner(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TScan scan) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public int openScanner(ByteBuffer table, TScan scan) throws TIOError, org.apache.thrift.TException
     {
       send_openScanner(table, scan);
       return recv_openScanner();
     }
 
-    public void send_openScanner(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TScan scan) throws org.apache.thrift.TException
+    public void send_openScanner(ByteBuffer table, TScan scan) throws org.apache.thrift.TException
     {
       oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("openScanner", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
       openScanner_args args = new openScanner_args();
@@ -746,7 +746,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public int recv_openScanner() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException
+    public int recv_openScanner() throws TIOError, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -769,7 +769,7 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "openScanner failed: unknown result");
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> getScannerRows(int scannerId, int numRows) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument, org.apache.thrift.TException
+    public List<TResult> getScannerRows(int scannerId, int numRows) throws TIOError, TIllegalArgument, org.apache.thrift.TException
     {
       send_getScannerRows(scannerId, numRows);
       return recv_getScannerRows();
@@ -786,7 +786,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> recv_getScannerRows() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument, org.apache.thrift.TException
+    public List<TResult> recv_getScannerRows() throws TIOError, TIllegalArgument, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -812,7 +812,7 @@ public class HbaseClient {
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "getScannerRows failed: unknown result");
     }
 
-    public void closeScanner(int scannerId) throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument, org.apache.thrift.TException
+    public void closeScanner(int scannerId) throws TIOError, TIllegalArgument, org.apache.thrift.TException
     {
       send_closeScanner(scannerId);
       recv_closeScanner();
@@ -828,7 +828,7 @@ public class HbaseClient {
       oprot_.getTransport().flush();
     }
 
-    public void recv_closeScanner() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument, org.apache.thrift.TException
+    public void recv_closeScanner() throws TIOError, TIllegalArgument, org.apache.thrift.TException
     {
       org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
       if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
@@ -869,7 +869,7 @@ public class HbaseClient {
       super(protocolFactory, clientManager, transport);
     }
 
-    public void exists(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get, org.apache.thrift.async.AsyncMethodCallback<exists_call> resultHandler) throws org.apache.thrift.TException {
+    public void exists(ByteBuffer table, TGet get, org.apache.thrift.async.AsyncMethodCallback<exists_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       exists_call method_call = new exists_call(table, get, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -878,8 +878,8 @@ public class HbaseClient {
 
     public static class exists_call extends org.apache.thrift.async.TAsyncMethodCall {
       private ByteBuffer table;
-      private org.apache.hadoop.hbase.thrift2.generated.TGet get;
-      public exists_call(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get, org.apache.thrift.async.AsyncMethodCallback<exists_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private TGet get;
+      public exists_call(ByteBuffer table, TGet get, org.apache.thrift.async.AsyncMethodCallback<exists_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.get = get;
@@ -894,7 +894,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public boolean getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public boolean getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -904,7 +904,7 @@ public class HbaseClient {
       }
     }
 
-    public void get(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get, org.apache.thrift.async.AsyncMethodCallback<get_call> resultHandler) throws org.apache.thrift.TException {
+    public void get(ByteBuffer table, TGet get, org.apache.thrift.async.AsyncMethodCallback<get_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       get_call method_call = new get_call(table, get, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -913,8 +913,8 @@ public class HbaseClient {
 
     public static class get_call extends org.apache.thrift.async.TAsyncMethodCall {
       private ByteBuffer table;
-      private org.apache.hadoop.hbase.thrift2.generated.TGet get;
-      public get_call(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TGet get, org.apache.thrift.async.AsyncMethodCallback<get_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private TGet get;
+      public get_call(ByteBuffer table, TGet get, org.apache.thrift.async.AsyncMethodCallback<get_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.get = get;
@@ -929,7 +929,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public org.apache.hadoop.hbase.thrift2.generated.TResult getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public TResult getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -939,7 +939,7 @@ public class HbaseClient {
       }
     }
 
-    public void getMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets, org.apache.thrift.async.AsyncMethodCallback<getMultiple_call> resultHandler) throws org.apache.thrift.TException {
+    public void getMultiple(ByteBuffer table, List<TGet> gets, org.apache.thrift.async.AsyncMethodCallback<getMultiple_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       getMultiple_call method_call = new getMultiple_call(table, gets, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -948,8 +948,8 @@ public class HbaseClient {
 
     public static class getMultiple_call extends org.apache.thrift.async.TAsyncMethodCall {
       private ByteBuffer table;
-      private List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets;
-      public getMultiple_call(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets, org.apache.thrift.async.AsyncMethodCallback<getMultiple_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private List<TGet> gets;
+      public getMultiple_call(ByteBuffer table, List<TGet> gets, org.apache.thrift.async.AsyncMethodCallback<getMultiple_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.gets = gets;
@@ -964,7 +964,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public List<org.apache.hadoop.hbase.thrift2.generated.TResult> getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public List<TResult> getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1002,7 +1002,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public org.apache.hadoop.hbase.thrift2.generated.TResult getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public TResult getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1012,7 +1012,7 @@ public class HbaseClient {
       }
     }
 
-    public void put(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TPut put, org.apache.thrift.async.AsyncMethodCallback<put_call> resultHandler) throws org.apache.thrift.TException {
+    public void put(ByteBuffer table, TPut put, org.apache.thrift.async.AsyncMethodCallback<put_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       put_call method_call = new put_call(table, put, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -1021,8 +1021,8 @@ public class HbaseClient {
 
     public static class put_call extends org.apache.thrift.async.TAsyncMethodCall {
       private ByteBuffer table;
-      private org.apache.hadoop.hbase.thrift2.generated.TPut put;
-      public put_call(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TPut put, org.apache.thrift.async.AsyncMethodCallback<put_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private TPut put;
+      public put_call(ByteBuffer table, TPut put, org.apache.thrift.async.AsyncMethodCallback<put_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.put = put;
@@ -1037,7 +1037,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public void getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public void getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1047,7 +1047,7 @@ public class HbaseClient {
       }
     }
 
-    public void checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TPut put, org.apache.thrift.async.AsyncMethodCallback<checkAndPut_call> resultHandler) throws org.apache.thrift.TException {
+    public void checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TPut put, org.apache.thrift.async.AsyncMethodCallback<checkAndPut_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       checkAndPut_call method_call = new checkAndPut_call(table, row, family, qualifier, value, put, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -1060,8 +1060,8 @@ public class HbaseClient {
       private ByteBuffer family;
       private ByteBuffer qualifier;
       private ByteBuffer value;
-      private org.apache.hadoop.hbase.thrift2.generated.TPut put;
-      public checkAndPut_call(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TPut put, org.apache.thrift.async.AsyncMethodCallback<checkAndPut_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private TPut put;
+      public checkAndPut_call(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TPut put, org.apache.thrift.async.AsyncMethodCallback<checkAndPut_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.row = row;
@@ -1084,7 +1084,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public boolean getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public boolean getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1094,7 +1094,7 @@ public class HbaseClient {
       }
     }
 
-    public void putMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts, org.apache.thrift.async.AsyncMethodCallback<putMultiple_call> resultHandler) throws org.apache.thrift.TException {
+    public void putMultiple(ByteBuffer table, List<TPut> puts, org.apache.thrift.async.AsyncMethodCallback<putMultiple_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       putMultiple_call method_call = new putMultiple_call(table, puts, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -1103,8 +1103,8 @@ public class HbaseClient {
 
     public static class putMultiple_call extends org.apache.thrift.async.TAsyncMethodCall {
       private ByteBuffer table;
-      private List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts;
-      public putMultiple_call(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts, org.apache.thrift.async.AsyncMethodCallback<putMultiple_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private List<TPut> puts;
+      public putMultiple_call(ByteBuffer table, List<TPut> puts, org.apache.thrift.async.AsyncMethodCallback<putMultiple_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.puts = puts;
@@ -1119,7 +1119,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public void getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public void getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1129,7 +1129,7 @@ public class HbaseClient {
       }
     }
 
-    public void deleteSingle(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<deleteSingle_call> resultHandler) throws org.apache.thrift.TException {
+    public void deleteSingle(ByteBuffer table, TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<deleteSingle_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       deleteSingle_call method_call = new deleteSingle_call(table, deleteSingle, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -1138,8 +1138,8 @@ public class HbaseClient {
 
     public static class deleteSingle_call extends org.apache.thrift.async.TAsyncMethodCall {
       private ByteBuffer table;
-      private org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle;
-      public deleteSingle_call(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<deleteSingle_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private TDelete deleteSingle;
+      public deleteSingle_call(ByteBuffer table, TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<deleteSingle_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.deleteSingle = deleteSingle;
@@ -1154,7 +1154,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public void getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public void getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1164,7 +1164,7 @@ public class HbaseClient {
       }
     }
 
-    public void deleteMultiple(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes, org.apache.thrift.async.AsyncMethodCallback<deleteMultiple_call> resultHandler) throws org.apache.thrift.TException {
+    public void deleteMultiple(ByteBuffer table, List<TDelete> deletes, org.apache.thrift.async.AsyncMethodCallback<deleteMultiple_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       deleteMultiple_call method_call = new deleteMultiple_call(table, deletes, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -1173,8 +1173,8 @@ public class HbaseClient {
 
     public static class deleteMultiple_call extends org.apache.thrift.async.TAsyncMethodCall {
       private ByteBuffer table;
-      private List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes;
-      public deleteMultiple_call(ByteBuffer table, List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes, org.apache.thrift.async.AsyncMethodCallback<deleteMultiple_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private List<TDelete> deletes;
+      public deleteMultiple_call(ByteBuffer table, List<TDelete> deletes, org.apache.thrift.async.AsyncMethodCallback<deleteMultiple_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.deletes = deletes;
@@ -1189,7 +1189,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public List<org.apache.hadoop.hbase.thrift2.generated.TDelete> getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public List<TDelete> getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1199,7 +1199,7 @@ public class HbaseClient {
       }
     }
 
-    public void checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<checkAndDelete_call> resultHandler) throws org.apache.thrift.TException {
+    public void checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<checkAndDelete_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       checkAndDelete_call method_call = new checkAndDelete_call(table, row, family, qualifier, value, deleteSingle, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -1212,8 +1212,8 @@ public class HbaseClient {
       private ByteBuffer family;
       private ByteBuffer qualifier;
       private ByteBuffer value;
-      private org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle;
-      public checkAndDelete_call(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<checkAndDelete_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private TDelete deleteSingle;
+      public checkAndDelete_call(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<checkAndDelete_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.row = row;
@@ -1236,7 +1236,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public boolean getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public boolean getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1283,7 +1283,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public long getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public long getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1293,7 +1293,7 @@ public class HbaseClient {
       }
     }
 
-    public void openScanner(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TScan scan, org.apache.thrift.async.AsyncMethodCallback<openScanner_call> resultHandler) throws org.apache.thrift.TException {
+    public void openScanner(ByteBuffer table, TScan scan, org.apache.thrift.async.AsyncMethodCallback<openScanner_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       openScanner_call method_call = new openScanner_call(table, scan, resultHandler, this, protocolFactory, transport);
       this.currentMethod = method_call;
@@ -1302,8 +1302,8 @@ public class HbaseClient {
 
     public static class openScanner_call extends org.apache.thrift.async.TAsyncMethodCall {
       private ByteBuffer table;
-      private org.apache.hadoop.hbase.thrift2.generated.TScan scan;
-      public openScanner_call(ByteBuffer table, org.apache.hadoop.hbase.thrift2.generated.TScan scan, org.apache.thrift.async.AsyncMethodCallback<openScanner_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+      private TScan scan;
+      public openScanner_call(ByteBuffer table, TScan scan, org.apache.thrift.async.AsyncMethodCallback<openScanner_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
         super(client, protocolFactory, transport, resultHandler, false);
         this.table = table;
         this.scan = scan;
@@ -1318,7 +1318,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public int getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.thrift.TException {
+      public int getResult() throws TIOError, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1353,7 +1353,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public List<org.apache.hadoop.hbase.thrift2.generated.TResult> getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument, org.apache.thrift.TException {
+      public List<TResult> getResult() throws TIOError, TIllegalArgument, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1385,7 +1385,7 @@ public class HbaseClient {
         prot.writeMessageEnd();
       }
 
-      public void getResult() throws org.apache.hadoop.hbase.thrift2.generated.TIOError, org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument, org.apache.thrift.TException {
+      public void getResult() throws TIOError, TIllegalArgument, org.apache.thrift.TException {
         if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
           throw new IllegalStateException("Method call not finished!");
         }
@@ -1463,7 +1463,7 @@ public class HbaseClient {
         try {
           result.success = iface_.exists(args.table, args.get);
           result.setSuccessIsSet(true);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing exists", th);
@@ -1501,7 +1501,7 @@ public class HbaseClient {
         get_result result = new get_result();
         try {
           result.success = iface_.get(args.table, args.get);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing get", th);
@@ -1539,7 +1539,7 @@ public class HbaseClient {
         getMultiple_result result = new getMultiple_result();
         try {
           result.success = iface_.getMultiple(args.table, args.gets);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing getMultiple", th);
@@ -1577,7 +1577,7 @@ public class HbaseClient {
         getRowOrBefore_result result = new getRowOrBefore_result();
         try {
           result.success = iface_.getRowOrBefore(args.table, args.row, args.family);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing getRowOrBefore", th);
@@ -1615,7 +1615,7 @@ public class HbaseClient {
         put_result result = new put_result();
         try {
           iface_.put(args.table, args.put);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing put", th);
@@ -1654,7 +1654,7 @@ public class HbaseClient {
         try {
           result.success = iface_.checkAndPut(args.table, args.row, args.family, args.qualifier, args.value, args.put);
           result.setSuccessIsSet(true);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing checkAndPut", th);
@@ -1692,7 +1692,7 @@ public class HbaseClient {
         putMultiple_result result = new putMultiple_result();
         try {
           iface_.putMultiple(args.table, args.puts);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing putMultiple", th);
@@ -1730,7 +1730,7 @@ public class HbaseClient {
         deleteSingle_result result = new deleteSingle_result();
         try {
           iface_.deleteSingle(args.table, args.deleteSingle);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing deleteSingle", th);
@@ -1768,7 +1768,7 @@ public class HbaseClient {
         deleteMultiple_result result = new deleteMultiple_result();
         try {
           result.success = iface_.deleteMultiple(args.table, args.deletes);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing deleteMultiple", th);
@@ -1807,7 +1807,7 @@ public class HbaseClient {
         try {
           result.success = iface_.checkAndDelete(args.table, args.row, args.family, args.qualifier, args.value, args.deleteSingle);
           result.setSuccessIsSet(true);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing checkAndDelete", th);
@@ -1846,7 +1846,7 @@ public class HbaseClient {
         try {
           result.success = iface_.incrementColumnValue(args.table, args.row, args.family, args.qualifier, args.amount, args.writeToWal);
           result.setSuccessIsSet(true);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing incrementColumnValue", th);
@@ -1885,7 +1885,7 @@ public class HbaseClient {
         try {
           result.success = iface_.openScanner(args.table, args.scan);
           result.setSuccessIsSet(true);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing openScanner", th);
@@ -1923,9 +1923,9 @@ public class HbaseClient {
         getScannerRows_result result = new getScannerRows_result();
         try {
           result.success = iface_.getScannerRows(args.scannerId, args.numRows);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument ia) {
+        } catch (TIllegalArgument ia) {
           result.ia = ia;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing getScannerRows", th);
@@ -1963,9 +1963,9 @@ public class HbaseClient {
         closeScanner_result result = new closeScanner_result();
         try {
           iface_.closeScanner(args.scannerId);
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+        } catch (TIOError io) {
           result.io = io;
-        } catch (org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument ia) {
+        } catch (TIllegalArgument ia) {
           result.ia = ia;
         } catch (Throwable th) {
           LOGGER.error("Internal error processing closeScanner", th);
@@ -1999,7 +1999,7 @@ public class HbaseClient {
     /**
      * the TGet to check for
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TGet get;
+    public TGet get;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -2076,7 +2076,7 @@ public class HbaseClient {
       tmpMap.put(_Fields.TABLE, new org.apache.thrift.meta_data.FieldMetaData("table", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.GET, new org.apache.thrift.meta_data.FieldMetaData("get", org.apache.thrift.TFieldRequirementType.REQUIRED, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TGet.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TGet.class)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(exists_args.class, metaDataMap);
     }
@@ -2086,7 +2086,7 @@ public class HbaseClient {
 
     public exists_args(
       ByteBuffer table,
-      org.apache.hadoop.hbase.thrift2.generated.TGet get)
+      TGet get)
     {
       this();
       this.table = table;
@@ -2102,7 +2102,7 @@ public class HbaseClient {
 ;
       }
       if (other.isSetGet()) {
-        this.get = new org.apache.hadoop.hbase.thrift2.generated.TGet(other.get);
+        this.get = new TGet(other.get);
       }
     }
 
@@ -2159,14 +2159,14 @@ public class HbaseClient {
     /**
      * the TGet to check for
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TGet getGet() {
+    public TGet getGet() {
       return this.get;
     }
 
     /**
      * the TGet to check for
      */
-    public exists_args setGet(org.apache.hadoop.hbase.thrift2.generated.TGet get) {
+    public exists_args setGet(TGet get) {
       this.get = get;
       return this;
     }
@@ -2200,7 +2200,7 @@ public class HbaseClient {
         if (value == null) {
           unsetGet();
         } else {
-          setGet((org.apache.hadoop.hbase.thrift2.generated.TGet)value);
+          setGet((TGet)value);
         }
         break;
 
@@ -2327,7 +2327,7 @@ public class HbaseClient {
             break;
           case 2: // GET
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.get = new org.apache.hadoop.hbase.thrift2.generated.TGet();
+              this.get = new TGet();
               this.get.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -2421,7 +2421,7 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
     public boolean success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -2504,7 +2504,7 @@ public class HbaseClient {
 
     public exists_result(
       boolean success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TIOError io)
     {
       this();
       this.success = success;
@@ -2520,7 +2520,7 @@ public class HbaseClient {
       __isset_bit_vector.or(other.__isset_bit_vector);
       this.success = other.success;
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -2558,11 +2558,11 @@ public class HbaseClient {
       __isset_bit_vector.set(__SUCCESS_ISSET_ID, value);
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public exists_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public exists_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -2596,7 +2596,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -2724,7 +2724,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -2812,7 +2812,7 @@ public class HbaseClient {
     /**
      * the TGet to fetch
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TGet get;
+    public TGet get;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -2889,7 +2889,7 @@ public class HbaseClient {
       tmpMap.put(_Fields.TABLE, new org.apache.thrift.meta_data.FieldMetaData("table", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.GET, new org.apache.thrift.meta_data.FieldMetaData("get", org.apache.thrift.TFieldRequirementType.REQUIRED, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TGet.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TGet.class)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(get_args.class, metaDataMap);
     }
@@ -2899,7 +2899,7 @@ public class HbaseClient {
 
     public get_args(
       ByteBuffer table,
-      org.apache.hadoop.hbase.thrift2.generated.TGet get)
+      TGet get)
     {
       this();
       this.table = table;
@@ -2915,7 +2915,7 @@ public class HbaseClient {
 ;
       }
       if (other.isSetGet()) {
-        this.get = new org.apache.hadoop.hbase.thrift2.generated.TGet(other.get);
+        this.get = new TGet(other.get);
       }
     }
 
@@ -2972,14 +2972,14 @@ public class HbaseClient {
     /**
      * the TGet to fetch
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TGet getGet() {
+    public TGet getGet() {
       return this.get;
     }
 
     /**
      * the TGet to fetch
      */
-    public get_args setGet(org.apache.hadoop.hbase.thrift2.generated.TGet get) {
+    public get_args setGet(TGet get) {
       this.get = get;
       return this;
     }
@@ -3013,7 +3013,7 @@ public class HbaseClient {
         if (value == null) {
           unsetGet();
         } else {
-          setGet((org.apache.hadoop.hbase.thrift2.generated.TGet)value);
+          setGet((TGet)value);
         }
         break;
 
@@ -3140,7 +3140,7 @@ public class HbaseClient {
             break;
           case 2: // GET
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.get = new org.apache.hadoop.hbase.thrift2.generated.TGet();
+              this.get = new TGet();
               this.get.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -3233,8 +3233,8 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField SUCCESS_FIELD_DESC = new org.apache.thrift.protocol.TField("success", org.apache.thrift.protocol.TType.STRUCT, (short)0);
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
-    public org.apache.hadoop.hbase.thrift2.generated.TResult success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TResult success;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -3303,7 +3303,7 @@ public class HbaseClient {
     static {
       Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
       tmpMap.put(_Fields.SUCCESS, new org.apache.thrift.meta_data.FieldMetaData("success", org.apache.thrift.TFieldRequirementType.DEFAULT, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TResult.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TResult.class)));
       tmpMap.put(_Fields.IO, new org.apache.thrift.meta_data.FieldMetaData("io", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRUCT)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
@@ -3314,8 +3314,8 @@ public class HbaseClient {
     }
 
     public get_result(
-      org.apache.hadoop.hbase.thrift2.generated.TResult success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TResult success,
+      TIOError io)
     {
       this();
       this.success = success;
@@ -3327,10 +3327,10 @@ public class HbaseClient {
      */
     public get_result(get_result other) {
       if (other.isSetSuccess()) {
-        this.success = new org.apache.hadoop.hbase.thrift2.generated.TResult(other.success);
+        this.success = new TResult(other.success);
       }
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -3344,11 +3344,11 @@ public class HbaseClient {
       this.io = null;
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TResult getSuccess() {
+    public TResult getSuccess() {
       return this.success;
     }
 
-    public get_result setSuccess(org.apache.hadoop.hbase.thrift2.generated.TResult success) {
+    public get_result setSuccess(TResult success) {
       this.success = success;
       return this;
     }
@@ -3368,11 +3368,11 @@ public class HbaseClient {
       }
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public get_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public get_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -3398,7 +3398,7 @@ public class HbaseClient {
         if (value == null) {
           unsetSuccess();
         } else {
-          setSuccess((org.apache.hadoop.hbase.thrift2.generated.TResult)value);
+          setSuccess((TResult)value);
         }
         break;
 
@@ -3406,7 +3406,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -3526,7 +3526,7 @@ public class HbaseClient {
         switch (field.id) {
           case 0: // SUCCESS
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.success = new org.apache.hadoop.hbase.thrift2.generated.TResult();
+              this.success = new TResult();
               this.success.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -3534,7 +3534,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -3628,7 +3628,7 @@ public class HbaseClient {
      * will have the Results at corresponding positions
      * or null if there was an error
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets;
+    public List<TGet> gets;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -3708,7 +3708,7 @@ public class HbaseClient {
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.GETS, new org.apache.thrift.meta_data.FieldMetaData("gets", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.ListMetaData(org.apache.thrift.protocol.TType.LIST, 
-              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TGet.class))));
+              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TGet.class))));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(getMultiple_args.class, metaDataMap);
     }
@@ -3718,7 +3718,7 @@ public class HbaseClient {
 
     public getMultiple_args(
       ByteBuffer table,
-      List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets)
+      List<TGet> gets)
     {
       this();
       this.table = table;
@@ -3734,9 +3734,9 @@ public class HbaseClient {
 ;
       }
       if (other.isSetGets()) {
-        List<org.apache.hadoop.hbase.thrift2.generated.TGet> __this__gets = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TGet>();
-        for (org.apache.hadoop.hbase.thrift2.generated.TGet other_element : other.gets) {
-          __this__gets.add(new org.apache.hadoop.hbase.thrift2.generated.TGet(other_element));
+        List<TGet> __this__gets = new ArrayList<TGet>();
+        for (TGet other_element : other.gets) {
+          __this__gets.add(new TGet(other_element));
         }
         this.gets = __this__gets;
       }
@@ -3796,13 +3796,13 @@ public class HbaseClient {
       return (this.gets == null) ? 0 : this.gets.size();
     }
 
-    public java.util.Iterator<org.apache.hadoop.hbase.thrift2.generated.TGet> getGetsIterator() {
+    public java.util.Iterator<TGet> getGetsIterator() {
       return (this.gets == null) ? null : this.gets.iterator();
     }
 
-    public void addToGets(org.apache.hadoop.hbase.thrift2.generated.TGet elem) {
+    public void addToGets(TGet elem) {
       if (this.gets == null) {
-        this.gets = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TGet>();
+        this.gets = new ArrayList<TGet>();
       }
       this.gets.add(elem);
     }
@@ -3812,7 +3812,7 @@ public class HbaseClient {
      * will have the Results at corresponding positions
      * or null if there was an error
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TGet> getGets() {
+    public List<TGet> getGets() {
       return this.gets;
     }
 
@@ -3821,7 +3821,7 @@ public class HbaseClient {
      * will have the Results at corresponding positions
      * or null if there was an error
      */
-    public getMultiple_args setGets(List<org.apache.hadoop.hbase.thrift2.generated.TGet> gets) {
+    public getMultiple_args setGets(List<TGet> gets) {
       this.gets = gets;
       return this;
     }
@@ -3855,7 +3855,7 @@ public class HbaseClient {
         if (value == null) {
           unsetGets();
         } else {
-          setGets((List<org.apache.hadoop.hbase.thrift2.generated.TGet>)value);
+          setGets((List<TGet>)value);
         }
         break;
 
@@ -3983,14 +3983,14 @@ public class HbaseClient {
           case 2: // GETS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list0 = iprot.readListBegin();
-                this.gets = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TGet>(_list0.size);
-                for (int _i1 = 0; _i1 < _list0.size; ++_i1)
+                org.apache.thrift.protocol.TList _list25 = iprot.readListBegin();
+                this.gets = new ArrayList<TGet>(_list25.size);
+                for (int _i26 = 0; _i26 < _list25.size; ++_i26)
                 {
-                  org.apache.hadoop.hbase.thrift2.generated.TGet _elem2;
-                  _elem2 = new org.apache.hadoop.hbase.thrift2.generated.TGet();
-                  _elem2.read(iprot);
-                  this.gets.add(_elem2);
+                  TGet _elem27;
+                  _elem27 = new TGet();
+                  _elem27.read(iprot);
+                  this.gets.add(_elem27);
                 }
                 iprot.readListEnd();
               }
@@ -4022,9 +4022,9 @@ public class HbaseClient {
         oprot.writeFieldBegin(GETS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.gets.size()));
-          for (org.apache.hadoop.hbase.thrift2.generated.TGet _iter3 : this.gets)
+          for (TGet _iter28 : this.gets)
           {
-            _iter3.write(oprot);
+            _iter28.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -4092,8 +4092,8 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField SUCCESS_FIELD_DESC = new org.apache.thrift.protocol.TField("success", org.apache.thrift.protocol.TType.LIST, (short)0);
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public List<TResult> success;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -4163,7 +4163,7 @@ public class HbaseClient {
       Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
       tmpMap.put(_Fields.SUCCESS, new org.apache.thrift.meta_data.FieldMetaData("success", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.ListMetaData(org.apache.thrift.protocol.TType.LIST, 
-              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TResult.class))));
+              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TResult.class))));
       tmpMap.put(_Fields.IO, new org.apache.thrift.meta_data.FieldMetaData("io", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRUCT)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
@@ -4174,8 +4174,8 @@ public class HbaseClient {
     }
 
     public getMultiple_result(
-      List<org.apache.hadoop.hbase.thrift2.generated.TResult> success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      List<TResult> success,
+      TIOError io)
     {
       this();
       this.success = success;
@@ -4187,14 +4187,14 @@ public class HbaseClient {
      */
     public getMultiple_result(getMultiple_result other) {
       if (other.isSetSuccess()) {
-        List<org.apache.hadoop.hbase.thrift2.generated.TResult> __this__success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TResult>();
-        for (org.apache.hadoop.hbase.thrift2.generated.TResult other_element : other.success) {
-          __this__success.add(new org.apache.hadoop.hbase.thrift2.generated.TResult(other_element));
+        List<TResult> __this__success = new ArrayList<TResult>();
+        for (TResult other_element : other.success) {
+          __this__success.add(new TResult(other_element));
         }
         this.success = __this__success;
       }
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -4212,22 +4212,22 @@ public class HbaseClient {
       return (this.success == null) ? 0 : this.success.size();
     }
 
-    public java.util.Iterator<org.apache.hadoop.hbase.thrift2.generated.TResult> getSuccessIterator() {
+    public java.util.Iterator<TResult> getSuccessIterator() {
       return (this.success == null) ? null : this.success.iterator();
     }
 
-    public void addToSuccess(org.apache.hadoop.hbase.thrift2.generated.TResult elem) {
+    public void addToSuccess(TResult elem) {
       if (this.success == null) {
-        this.success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TResult>();
+        this.success = new ArrayList<TResult>();
       }
       this.success.add(elem);
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> getSuccess() {
+    public List<TResult> getSuccess() {
       return this.success;
     }
 
-    public getMultiple_result setSuccess(List<org.apache.hadoop.hbase.thrift2.generated.TResult> success) {
+    public getMultiple_result setSuccess(List<TResult> success) {
       this.success = success;
       return this;
     }
@@ -4247,11 +4247,11 @@ public class HbaseClient {
       }
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public getMultiple_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public getMultiple_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -4277,7 +4277,7 @@ public class HbaseClient {
         if (value == null) {
           unsetSuccess();
         } else {
-          setSuccess((List<org.apache.hadoop.hbase.thrift2.generated.TResult>)value);
+          setSuccess((List<TResult>)value);
         }
         break;
 
@@ -4285,7 +4285,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -4406,14 +4406,14 @@ public class HbaseClient {
           case 0: // SUCCESS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list4 = iprot.readListBegin();
-                this.success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TResult>(_list4.size);
-                for (int _i5 = 0; _i5 < _list4.size; ++_i5)
+                org.apache.thrift.protocol.TList _list29 = iprot.readListBegin();
+                this.success = new ArrayList<TResult>(_list29.size);
+                for (int _i30 = 0; _i30 < _list29.size; ++_i30)
                 {
-                  org.apache.hadoop.hbase.thrift2.generated.TResult _elem6;
-                  _elem6 = new org.apache.hadoop.hbase.thrift2.generated.TResult();
-                  _elem6.read(iprot);
-                  this.success.add(_elem6);
+                  TResult _elem31;
+                  _elem31 = new TResult();
+                  _elem31.read(iprot);
+                  this.success.add(_elem31);
                 }
                 iprot.readListEnd();
               }
@@ -4423,7 +4423,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -4447,9 +4447,9 @@ public class HbaseClient {
         oprot.writeFieldBegin(SUCCESS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.success.size()));
-          for (org.apache.hadoop.hbase.thrift2.generated.TResult _iter7 : this.success)
+          for (TResult _iter32 : this.success)
           {
-            _iter7.write(oprot);
+            _iter32.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -5068,8 +5068,8 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField SUCCESS_FIELD_DESC = new org.apache.thrift.protocol.TField("success", org.apache.thrift.protocol.TType.STRUCT, (short)0);
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
-    public org.apache.hadoop.hbase.thrift2.generated.TResult success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TResult success;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -5138,7 +5138,7 @@ public class HbaseClient {
     static {
       Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
       tmpMap.put(_Fields.SUCCESS, new org.apache.thrift.meta_data.FieldMetaData("success", org.apache.thrift.TFieldRequirementType.DEFAULT, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TResult.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TResult.class)));
       tmpMap.put(_Fields.IO, new org.apache.thrift.meta_data.FieldMetaData("io", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRUCT)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
@@ -5149,8 +5149,8 @@ public class HbaseClient {
     }
 
     public getRowOrBefore_result(
-      org.apache.hadoop.hbase.thrift2.generated.TResult success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TResult success,
+      TIOError io)
     {
       this();
       this.success = success;
@@ -5162,10 +5162,10 @@ public class HbaseClient {
      */
     public getRowOrBefore_result(getRowOrBefore_result other) {
       if (other.isSetSuccess()) {
-        this.success = new org.apache.hadoop.hbase.thrift2.generated.TResult(other.success);
+        this.success = new TResult(other.success);
       }
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -5179,11 +5179,11 @@ public class HbaseClient {
       this.io = null;
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TResult getSuccess() {
+    public TResult getSuccess() {
       return this.success;
     }
 
-    public getRowOrBefore_result setSuccess(org.apache.hadoop.hbase.thrift2.generated.TResult success) {
+    public getRowOrBefore_result setSuccess(TResult success) {
       this.success = success;
       return this;
     }
@@ -5203,11 +5203,11 @@ public class HbaseClient {
       }
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public getRowOrBefore_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public getRowOrBefore_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -5233,7 +5233,7 @@ public class HbaseClient {
         if (value == null) {
           unsetSuccess();
         } else {
-          setSuccess((org.apache.hadoop.hbase.thrift2.generated.TResult)value);
+          setSuccess((TResult)value);
         }
         break;
 
@@ -5241,7 +5241,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -5361,7 +5361,7 @@ public class HbaseClient {
         switch (field.id) {
           case 0: // SUCCESS
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.success = new org.apache.hadoop.hbase.thrift2.generated.TResult();
+              this.success = new TResult();
               this.success.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -5369,7 +5369,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -5461,7 +5461,7 @@ public class HbaseClient {
     /**
      * the TPut to put
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TPut put;
+    public TPut put;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -5538,7 +5538,7 @@ public class HbaseClient {
       tmpMap.put(_Fields.TABLE, new org.apache.thrift.meta_data.FieldMetaData("table", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.PUT, new org.apache.thrift.meta_data.FieldMetaData("put", org.apache.thrift.TFieldRequirementType.REQUIRED, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TPut.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TPut.class)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(put_args.class, metaDataMap);
     }
@@ -5548,7 +5548,7 @@ public class HbaseClient {
 
     public put_args(
       ByteBuffer table,
-      org.apache.hadoop.hbase.thrift2.generated.TPut put)
+      TPut put)
     {
       this();
       this.table = table;
@@ -5564,7 +5564,7 @@ public class HbaseClient {
 ;
       }
       if (other.isSetPut()) {
-        this.put = new org.apache.hadoop.hbase.thrift2.generated.TPut(other.put);
+        this.put = new TPut(other.put);
       }
     }
 
@@ -5621,14 +5621,14 @@ public class HbaseClient {
     /**
      * the TPut to put
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TPut getPut() {
+    public TPut getPut() {
       return this.put;
     }
 
     /**
      * the TPut to put
      */
-    public put_args setPut(org.apache.hadoop.hbase.thrift2.generated.TPut put) {
+    public put_args setPut(TPut put) {
       this.put = put;
       return this;
     }
@@ -5662,7 +5662,7 @@ public class HbaseClient {
         if (value == null) {
           unsetPut();
         } else {
-          setPut((org.apache.hadoop.hbase.thrift2.generated.TPut)value);
+          setPut((TPut)value);
         }
         break;
 
@@ -5789,7 +5789,7 @@ public class HbaseClient {
             break;
           case 2: // PUT
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.put = new org.apache.hadoop.hbase.thrift2.generated.TPut();
+              this.put = new TPut();
               this.put.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -5881,7 +5881,7 @@ public class HbaseClient {
 
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -5956,7 +5956,7 @@ public class HbaseClient {
     }
 
     public put_result(
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TIOError io)
     {
       this();
       this.io = io;
@@ -5967,7 +5967,7 @@ public class HbaseClient {
      */
     public put_result(put_result other) {
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -5980,11 +5980,11 @@ public class HbaseClient {
       this.io = null;
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public put_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public put_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -6010,7 +6010,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -6106,7 +6106,7 @@ public class HbaseClient {
         switch (field.id) {
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -6208,7 +6208,7 @@ public class HbaseClient {
     /**
      * the TPut to put if the check succeeds
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TPut put;
+    public TPut put;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -6319,7 +6319,7 @@ public class HbaseClient {
       tmpMap.put(_Fields.VALUE, new org.apache.thrift.meta_data.FieldMetaData("value", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.PUT, new org.apache.thrift.meta_data.FieldMetaData("put", org.apache.thrift.TFieldRequirementType.REQUIRED, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TPut.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TPut.class)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(checkAndPut_args.class, metaDataMap);
     }
@@ -6333,7 +6333,7 @@ public class HbaseClient {
       ByteBuffer family,
       ByteBuffer qualifier,
       ByteBuffer value,
-      org.apache.hadoop.hbase.thrift2.generated.TPut put)
+      TPut put)
     {
       this();
       this.table = table;
@@ -6369,7 +6369,7 @@ public class HbaseClient {
 ;
       }
       if (other.isSetPut()) {
-        this.put = new org.apache.hadoop.hbase.thrift2.generated.TPut(other.put);
+        this.put = new TPut(other.put);
       }
     }
 
@@ -6594,14 +6594,14 @@ public class HbaseClient {
     /**
      * the TPut to put if the check succeeds
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TPut getPut() {
+    public TPut getPut() {
       return this.put;
     }
 
     /**
      * the TPut to put if the check succeeds
      */
-    public checkAndPut_args setPut(org.apache.hadoop.hbase.thrift2.generated.TPut put) {
+    public checkAndPut_args setPut(TPut put) {
       this.put = put;
       return this;
     }
@@ -6667,7 +6667,7 @@ public class HbaseClient {
         if (value == null) {
           unsetPut();
         } else {
-          setPut((org.apache.hadoop.hbase.thrift2.generated.TPut)value);
+          setPut((TPut)value);
         }
         break;
 
@@ -6918,7 +6918,7 @@ public class HbaseClient {
             break;
           case 6: // PUT
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.put = new org.apache.hadoop.hbase.thrift2.generated.TPut();
+              this.put = new TPut();
               this.put.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -7073,7 +7073,7 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
     public boolean success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -7156,7 +7156,7 @@ public class HbaseClient {
 
     public checkAndPut_result(
       boolean success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TIOError io)
     {
       this();
       this.success = success;
@@ -7172,7 +7172,7 @@ public class HbaseClient {
       __isset_bit_vector.or(other.__isset_bit_vector);
       this.success = other.success;
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -7210,11 +7210,11 @@ public class HbaseClient {
       __isset_bit_vector.set(__SUCCESS_ISSET_ID, value);
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public checkAndPut_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public checkAndPut_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -7248,7 +7248,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -7376,7 +7376,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -7464,7 +7464,7 @@ public class HbaseClient {
     /**
      * a list of TPuts to commit
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts;
+    public List<TPut> puts;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -7542,7 +7542,7 @@ public class HbaseClient {
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.PUTS, new org.apache.thrift.meta_data.FieldMetaData("puts", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.ListMetaData(org.apache.thrift.protocol.TType.LIST, 
-              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TPut.class))));
+              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TPut.class))));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(putMultiple_args.class, metaDataMap);
     }
@@ -7552,7 +7552,7 @@ public class HbaseClient {
 
     public putMultiple_args(
       ByteBuffer table,
-      List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts)
+      List<TPut> puts)
     {
       this();
       this.table = table;
@@ -7568,9 +7568,9 @@ public class HbaseClient {
 ;
       }
       if (other.isSetPuts()) {
-        List<org.apache.hadoop.hbase.thrift2.generated.TPut> __this__puts = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TPut>();
-        for (org.apache.hadoop.hbase.thrift2.generated.TPut other_element : other.puts) {
-          __this__puts.add(new org.apache.hadoop.hbase.thrift2.generated.TPut(other_element));
+        List<TPut> __this__puts = new ArrayList<TPut>();
+        for (TPut other_element : other.puts) {
+          __this__puts.add(new TPut(other_element));
         }
         this.puts = __this__puts;
       }
@@ -7630,13 +7630,13 @@ public class HbaseClient {
       return (this.puts == null) ? 0 : this.puts.size();
     }
 
-    public java.util.Iterator<org.apache.hadoop.hbase.thrift2.generated.TPut> getPutsIterator() {
+    public java.util.Iterator<TPut> getPutsIterator() {
       return (this.puts == null) ? null : this.puts.iterator();
     }
 
-    public void addToPuts(org.apache.hadoop.hbase.thrift2.generated.TPut elem) {
+    public void addToPuts(TPut elem) {
       if (this.puts == null) {
-        this.puts = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TPut>();
+        this.puts = new ArrayList<TPut>();
       }
       this.puts.add(elem);
     }
@@ -7644,14 +7644,14 @@ public class HbaseClient {
     /**
      * a list of TPuts to commit
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TPut> getPuts() {
+    public List<TPut> getPuts() {
       return this.puts;
     }
 
     /**
      * a list of TPuts to commit
      */
-    public putMultiple_args setPuts(List<org.apache.hadoop.hbase.thrift2.generated.TPut> puts) {
+    public putMultiple_args setPuts(List<TPut> puts) {
       this.puts = puts;
       return this;
     }
@@ -7685,7 +7685,7 @@ public class HbaseClient {
         if (value == null) {
           unsetPuts();
         } else {
-          setPuts((List<org.apache.hadoop.hbase.thrift2.generated.TPut>)value);
+          setPuts((List<TPut>)value);
         }
         break;
 
@@ -7813,14 +7813,14 @@ public class HbaseClient {
           case 2: // PUTS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list8 = iprot.readListBegin();
-                this.puts = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TPut>(_list8.size);
-                for (int _i9 = 0; _i9 < _list8.size; ++_i9)
+                org.apache.thrift.protocol.TList _list33 = iprot.readListBegin();
+                this.puts = new ArrayList<TPut>(_list33.size);
+                for (int _i34 = 0; _i34 < _list33.size; ++_i34)
                 {
-                  org.apache.hadoop.hbase.thrift2.generated.TPut _elem10;
-                  _elem10 = new org.apache.hadoop.hbase.thrift2.generated.TPut();
-                  _elem10.read(iprot);
-                  this.puts.add(_elem10);
+                  TPut _elem35;
+                  _elem35 = new TPut();
+                  _elem35.read(iprot);
+                  this.puts.add(_elem35);
                 }
                 iprot.readListEnd();
               }
@@ -7852,9 +7852,9 @@ public class HbaseClient {
         oprot.writeFieldBegin(PUTS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.puts.size()));
-          for (org.apache.hadoop.hbase.thrift2.generated.TPut _iter11 : this.puts)
+          for (TPut _iter36 : this.puts)
           {
-            _iter11.write(oprot);
+            _iter36.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -7921,7 +7921,7 @@ public class HbaseClient {
 
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -7996,7 +7996,7 @@ public class HbaseClient {
     }
 
     public putMultiple_result(
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TIOError io)
     {
       this();
       this.io = io;
@@ -8007,7 +8007,7 @@ public class HbaseClient {
      */
     public putMultiple_result(putMultiple_result other) {
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -8020,11 +8020,11 @@ public class HbaseClient {
       this.io = null;
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public putMultiple_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public putMultiple_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -8050,7 +8050,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -8146,7 +8146,7 @@ public class HbaseClient {
         switch (field.id) {
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -8226,7 +8226,7 @@ public class HbaseClient {
     /**
      * the TDelete to delete
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle;
+    public TDelete deleteSingle;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -8303,7 +8303,7 @@ public class HbaseClient {
       tmpMap.put(_Fields.TABLE, new org.apache.thrift.meta_data.FieldMetaData("table", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.DELETE_SINGLE, new org.apache.thrift.meta_data.FieldMetaData("deleteSingle", org.apache.thrift.TFieldRequirementType.REQUIRED, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TDelete.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TDelete.class)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(deleteSingle_args.class, metaDataMap);
     }
@@ -8313,7 +8313,7 @@ public class HbaseClient {
 
     public deleteSingle_args(
       ByteBuffer table,
-      org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle)
+      TDelete deleteSingle)
     {
       this();
       this.table = table;
@@ -8329,7 +8329,7 @@ public class HbaseClient {
 ;
       }
       if (other.isSetDeleteSingle()) {
-        this.deleteSingle = new org.apache.hadoop.hbase.thrift2.generated.TDelete(other.deleteSingle);
+        this.deleteSingle = new TDelete(other.deleteSingle);
       }
     }
 
@@ -8386,14 +8386,14 @@ public class HbaseClient {
     /**
      * the TDelete to delete
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TDelete getDeleteSingle() {
+    public TDelete getDeleteSingle() {
       return this.deleteSingle;
     }
 
     /**
      * the TDelete to delete
      */
-    public deleteSingle_args setDeleteSingle(org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle) {
+    public deleteSingle_args setDeleteSingle(TDelete deleteSingle) {
       this.deleteSingle = deleteSingle;
       return this;
     }
@@ -8427,7 +8427,7 @@ public class HbaseClient {
         if (value == null) {
           unsetDeleteSingle();
         } else {
-          setDeleteSingle((org.apache.hadoop.hbase.thrift2.generated.TDelete)value);
+          setDeleteSingle((TDelete)value);
         }
         break;
 
@@ -8554,7 +8554,7 @@ public class HbaseClient {
             break;
           case 2: // DELETE_SINGLE
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.deleteSingle = new org.apache.hadoop.hbase.thrift2.generated.TDelete();
+              this.deleteSingle = new TDelete();
               this.deleteSingle.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -8646,7 +8646,7 @@ public class HbaseClient {
 
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -8721,7 +8721,7 @@ public class HbaseClient {
     }
 
     public deleteSingle_result(
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TIOError io)
     {
       this();
       this.io = io;
@@ -8732,7 +8732,7 @@ public class HbaseClient {
      */
     public deleteSingle_result(deleteSingle_result other) {
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -8745,11 +8745,11 @@ public class HbaseClient {
       this.io = null;
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public deleteSingle_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public deleteSingle_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -8775,7 +8775,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -8871,7 +8871,7 @@ public class HbaseClient {
         switch (field.id) {
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -8951,7 +8951,7 @@ public class HbaseClient {
     /**
      * list of TDeletes to delete
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes;
+    public List<TDelete> deletes;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -9029,7 +9029,7 @@ public class HbaseClient {
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.DELETES, new org.apache.thrift.meta_data.FieldMetaData("deletes", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.ListMetaData(org.apache.thrift.protocol.TType.LIST, 
-              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TDelete.class))));
+              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TDelete.class))));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(deleteMultiple_args.class, metaDataMap);
     }
@@ -9039,7 +9039,7 @@ public class HbaseClient {
 
     public deleteMultiple_args(
       ByteBuffer table,
-      List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes)
+      List<TDelete> deletes)
     {
       this();
       this.table = table;
@@ -9055,9 +9055,9 @@ public class HbaseClient {
 ;
       }
       if (other.isSetDeletes()) {
-        List<org.apache.hadoop.hbase.thrift2.generated.TDelete> __this__deletes = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TDelete>();
-        for (org.apache.hadoop.hbase.thrift2.generated.TDelete other_element : other.deletes) {
-          __this__deletes.add(new org.apache.hadoop.hbase.thrift2.generated.TDelete(other_element));
+        List<TDelete> __this__deletes = new ArrayList<TDelete>();
+        for (TDelete other_element : other.deletes) {
+          __this__deletes.add(new TDelete(other_element));
         }
         this.deletes = __this__deletes;
       }
@@ -9117,13 +9117,13 @@ public class HbaseClient {
       return (this.deletes == null) ? 0 : this.deletes.size();
     }
 
-    public java.util.Iterator<org.apache.hadoop.hbase.thrift2.generated.TDelete> getDeletesIterator() {
+    public java.util.Iterator<TDelete> getDeletesIterator() {
       return (this.deletes == null) ? null : this.deletes.iterator();
     }
 
-    public void addToDeletes(org.apache.hadoop.hbase.thrift2.generated.TDelete elem) {
+    public void addToDeletes(TDelete elem) {
       if (this.deletes == null) {
-        this.deletes = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TDelete>();
+        this.deletes = new ArrayList<TDelete>();
       }
       this.deletes.add(elem);
     }
@@ -9131,14 +9131,14 @@ public class HbaseClient {
     /**
      * list of TDeletes to delete
      */
-    public List<org.apache.hadoop.hbase.thrift2.generated.TDelete> getDeletes() {
+    public List<TDelete> getDeletes() {
       return this.deletes;
     }
 
     /**
      * list of TDeletes to delete
      */
-    public deleteMultiple_args setDeletes(List<org.apache.hadoop.hbase.thrift2.generated.TDelete> deletes) {
+    public deleteMultiple_args setDeletes(List<TDelete> deletes) {
       this.deletes = deletes;
       return this;
     }
@@ -9172,7 +9172,7 @@ public class HbaseClient {
         if (value == null) {
           unsetDeletes();
         } else {
-          setDeletes((List<org.apache.hadoop.hbase.thrift2.generated.TDelete>)value);
+          setDeletes((List<TDelete>)value);
         }
         break;
 
@@ -9300,14 +9300,14 @@ public class HbaseClient {
           case 2: // DELETES
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list12 = iprot.readListBegin();
-                this.deletes = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TDelete>(_list12.size);
-                for (int _i13 = 0; _i13 < _list12.size; ++_i13)
+                org.apache.thrift.protocol.TList _list37 = iprot.readListBegin();
+                this.deletes = new ArrayList<TDelete>(_list37.size);
+                for (int _i38 = 0; _i38 < _list37.size; ++_i38)
                 {
-                  org.apache.hadoop.hbase.thrift2.generated.TDelete _elem14;
-                  _elem14 = new org.apache.hadoop.hbase.thrift2.generated.TDelete();
-                  _elem14.read(iprot);
-                  this.deletes.add(_elem14);
+                  TDelete _elem39;
+                  _elem39 = new TDelete();
+                  _elem39.read(iprot);
+                  this.deletes.add(_elem39);
                 }
                 iprot.readListEnd();
               }
@@ -9339,9 +9339,9 @@ public class HbaseClient {
         oprot.writeFieldBegin(DELETES_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.deletes.size()));
-          for (org.apache.hadoop.hbase.thrift2.generated.TDelete _iter15 : this.deletes)
+          for (TDelete _iter40 : this.deletes)
           {
-            _iter15.write(oprot);
+            _iter40.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -9409,8 +9409,8 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField SUCCESS_FIELD_DESC = new org.apache.thrift.protocol.TField("success", org.apache.thrift.protocol.TType.LIST, (short)0);
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TDelete> success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public List<TDelete> success;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -9480,7 +9480,7 @@ public class HbaseClient {
       Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
       tmpMap.put(_Fields.SUCCESS, new org.apache.thrift.meta_data.FieldMetaData("success", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.ListMetaData(org.apache.thrift.protocol.TType.LIST, 
-              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TDelete.class))));
+              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TDelete.class))));
       tmpMap.put(_Fields.IO, new org.apache.thrift.meta_data.FieldMetaData("io", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRUCT)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
@@ -9491,8 +9491,8 @@ public class HbaseClient {
     }
 
     public deleteMultiple_result(
-      List<org.apache.hadoop.hbase.thrift2.generated.TDelete> success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      List<TDelete> success,
+      TIOError io)
     {
       this();
       this.success = success;
@@ -9504,14 +9504,14 @@ public class HbaseClient {
      */
     public deleteMultiple_result(deleteMultiple_result other) {
       if (other.isSetSuccess()) {
-        List<org.apache.hadoop.hbase.thrift2.generated.TDelete> __this__success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TDelete>();
-        for (org.apache.hadoop.hbase.thrift2.generated.TDelete other_element : other.success) {
-          __this__success.add(new org.apache.hadoop.hbase.thrift2.generated.TDelete(other_element));
+        List<TDelete> __this__success = new ArrayList<TDelete>();
+        for (TDelete other_element : other.success) {
+          __this__success.add(new TDelete(other_element));
         }
         this.success = __this__success;
       }
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -9529,22 +9529,22 @@ public class HbaseClient {
       return (this.success == null) ? 0 : this.success.size();
     }
 
-    public java.util.Iterator<org.apache.hadoop.hbase.thrift2.generated.TDelete> getSuccessIterator() {
+    public java.util.Iterator<TDelete> getSuccessIterator() {
       return (this.success == null) ? null : this.success.iterator();
     }
 
-    public void addToSuccess(org.apache.hadoop.hbase.thrift2.generated.TDelete elem) {
+    public void addToSuccess(TDelete elem) {
       if (this.success == null) {
-        this.success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TDelete>();
+        this.success = new ArrayList<TDelete>();
       }
       this.success.add(elem);
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TDelete> getSuccess() {
+    public List<TDelete> getSuccess() {
       return this.success;
     }
 
-    public deleteMultiple_result setSuccess(List<org.apache.hadoop.hbase.thrift2.generated.TDelete> success) {
+    public deleteMultiple_result setSuccess(List<TDelete> success) {
       this.success = success;
       return this;
     }
@@ -9564,11 +9564,11 @@ public class HbaseClient {
       }
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public deleteMultiple_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public deleteMultiple_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -9594,7 +9594,7 @@ public class HbaseClient {
         if (value == null) {
           unsetSuccess();
         } else {
-          setSuccess((List<org.apache.hadoop.hbase.thrift2.generated.TDelete>)value);
+          setSuccess((List<TDelete>)value);
         }
         break;
 
@@ -9602,7 +9602,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -9723,14 +9723,14 @@ public class HbaseClient {
           case 0: // SUCCESS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list16 = iprot.readListBegin();
-                this.success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TDelete>(_list16.size);
-                for (int _i17 = 0; _i17 < _list16.size; ++_i17)
+                org.apache.thrift.protocol.TList _list41 = iprot.readListBegin();
+                this.success = new ArrayList<TDelete>(_list41.size);
+                for (int _i42 = 0; _i42 < _list41.size; ++_i42)
                 {
-                  org.apache.hadoop.hbase.thrift2.generated.TDelete _elem18;
-                  _elem18 = new org.apache.hadoop.hbase.thrift2.generated.TDelete();
-                  _elem18.read(iprot);
-                  this.success.add(_elem18);
+                  TDelete _elem43;
+                  _elem43 = new TDelete();
+                  _elem43.read(iprot);
+                  this.success.add(_elem43);
                 }
                 iprot.readListEnd();
               }
@@ -9740,7 +9740,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -9764,9 +9764,9 @@ public class HbaseClient {
         oprot.writeFieldBegin(SUCCESS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.success.size()));
-          for (org.apache.hadoop.hbase.thrift2.generated.TDelete _iter19 : this.success)
+          for (TDelete _iter44 : this.success)
           {
-            _iter19.write(oprot);
+            _iter44.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -9861,7 +9861,7 @@ public class HbaseClient {
     /**
      * the TDelete to execute if the check succeeds
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle;
+    public TDelete deleteSingle;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -9972,7 +9972,7 @@ public class HbaseClient {
       tmpMap.put(_Fields.VALUE, new org.apache.thrift.meta_data.FieldMetaData("value", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.DELETE_SINGLE, new org.apache.thrift.meta_data.FieldMetaData("deleteSingle", org.apache.thrift.TFieldRequirementType.REQUIRED, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TDelete.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TDelete.class)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(checkAndDelete_args.class, metaDataMap);
     }
@@ -9986,7 +9986,7 @@ public class HbaseClient {
       ByteBuffer family,
       ByteBuffer qualifier,
       ByteBuffer value,
-      org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle)
+      TDelete deleteSingle)
     {
       this();
       this.table = table;
@@ -10022,7 +10022,7 @@ public class HbaseClient {
 ;
       }
       if (other.isSetDeleteSingle()) {
-        this.deleteSingle = new org.apache.hadoop.hbase.thrift2.generated.TDelete(other.deleteSingle);
+        this.deleteSingle = new TDelete(other.deleteSingle);
       }
     }
 
@@ -10247,14 +10247,14 @@ public class HbaseClient {
     /**
      * the TDelete to execute if the check succeeds
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TDelete getDeleteSingle() {
+    public TDelete getDeleteSingle() {
       return this.deleteSingle;
     }
 
     /**
      * the TDelete to execute if the check succeeds
      */
-    public checkAndDelete_args setDeleteSingle(org.apache.hadoop.hbase.thrift2.generated.TDelete deleteSingle) {
+    public checkAndDelete_args setDeleteSingle(TDelete deleteSingle) {
       this.deleteSingle = deleteSingle;
       return this;
     }
@@ -10320,7 +10320,7 @@ public class HbaseClient {
         if (value == null) {
           unsetDeleteSingle();
         } else {
-          setDeleteSingle((org.apache.hadoop.hbase.thrift2.generated.TDelete)value);
+          setDeleteSingle((TDelete)value);
         }
         break;
 
@@ -10571,7 +10571,7 @@ public class HbaseClient {
             break;
           case 6: // DELETE_SINGLE
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.deleteSingle = new org.apache.hadoop.hbase.thrift2.generated.TDelete();
+              this.deleteSingle = new TDelete();
               this.deleteSingle.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -10726,7 +10726,7 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
     public boolean success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -10809,7 +10809,7 @@ public class HbaseClient {
 
     public checkAndDelete_result(
       boolean success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TIOError io)
     {
       this();
       this.success = success;
@@ -10825,7 +10825,7 @@ public class HbaseClient {
       __isset_bit_vector.or(other.__isset_bit_vector);
       this.success = other.success;
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -10863,11 +10863,11 @@ public class HbaseClient {
       __isset_bit_vector.set(__SUCCESS_ISSET_ID, value);
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public checkAndDelete_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public checkAndDelete_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -10901,7 +10901,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -11029,7 +11029,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -11980,7 +11980,7 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
     public long success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -12063,7 +12063,7 @@ public class HbaseClient {
 
     public incrementColumnValue_result(
       long success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TIOError io)
     {
       this();
       this.success = success;
@@ -12079,7 +12079,7 @@ public class HbaseClient {
       __isset_bit_vector.or(other.__isset_bit_vector);
       this.success = other.success;
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -12117,11 +12117,11 @@ public class HbaseClient {
       __isset_bit_vector.set(__SUCCESS_ISSET_ID, value);
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public incrementColumnValue_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public incrementColumnValue_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -12155,7 +12155,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -12283,7 +12283,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -12371,7 +12371,7 @@ public class HbaseClient {
     /**
      * the scan object to get a Scanner for
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TScan scan;
+    public TScan scan;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -12448,7 +12448,7 @@ public class HbaseClient {
       tmpMap.put(_Fields.TABLE, new org.apache.thrift.meta_data.FieldMetaData("table", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.SCAN, new org.apache.thrift.meta_data.FieldMetaData("scan", org.apache.thrift.TFieldRequirementType.REQUIRED, 
-          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TScan.class)));
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TScan.class)));
       metaDataMap = Collections.unmodifiableMap(tmpMap);
       org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(openScanner_args.class, metaDataMap);
     }
@@ -12458,7 +12458,7 @@ public class HbaseClient {
 
     public openScanner_args(
       ByteBuffer table,
-      org.apache.hadoop.hbase.thrift2.generated.TScan scan)
+      TScan scan)
     {
       this();
       this.table = table;
@@ -12474,7 +12474,7 @@ public class HbaseClient {
 ;
       }
       if (other.isSetScan()) {
-        this.scan = new org.apache.hadoop.hbase.thrift2.generated.TScan(other.scan);
+        this.scan = new TScan(other.scan);
       }
     }
 
@@ -12531,14 +12531,14 @@ public class HbaseClient {
     /**
      * the scan object to get a Scanner for
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TScan getScan() {
+    public TScan getScan() {
       return this.scan;
     }
 
     /**
      * the scan object to get a Scanner for
      */
-    public openScanner_args setScan(org.apache.hadoop.hbase.thrift2.generated.TScan scan) {
+    public openScanner_args setScan(TScan scan) {
       this.scan = scan;
       return this;
     }
@@ -12572,7 +12572,7 @@ public class HbaseClient {
         if (value == null) {
           unsetScan();
         } else {
-          setScan((org.apache.hadoop.hbase.thrift2.generated.TScan)value);
+          setScan((TScan)value);
         }
         break;
 
@@ -12699,7 +12699,7 @@ public class HbaseClient {
             break;
           case 2: // SCAN
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.scan = new org.apache.hadoop.hbase.thrift2.generated.TScan();
+              this.scan = new TScan();
               this.scan.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -12793,7 +12793,7 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
 
     public int success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -12876,7 +12876,7 @@ public class HbaseClient {
 
     public openScanner_result(
       int success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io)
+      TIOError io)
     {
       this();
       this.success = success;
@@ -12892,7 +12892,7 @@ public class HbaseClient {
       __isset_bit_vector.or(other.__isset_bit_vector);
       this.success = other.success;
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
     }
 
@@ -12930,11 +12930,11 @@ public class HbaseClient {
       __isset_bit_vector.set(__SUCCESS_ISSET_ID, value);
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public openScanner_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public openScanner_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -12968,7 +12968,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -13096,7 +13096,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -13589,12 +13589,12 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
     private static final org.apache.thrift.protocol.TField IA_FIELD_DESC = new org.apache.thrift.protocol.TField("ia", org.apache.thrift.protocol.TType.STRUCT, (short)2);
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> success;
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public List<TResult> success;
+    public TIOError io;
     /**
      * if the scannerId is invalid
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument ia;
+    public TIllegalArgument ia;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -13670,7 +13670,7 @@ public class HbaseClient {
       Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
       tmpMap.put(_Fields.SUCCESS, new org.apache.thrift.meta_data.FieldMetaData("success", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.ListMetaData(org.apache.thrift.protocol.TType.LIST, 
-              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, org.apache.hadoop.hbase.thrift2.generated.TResult.class))));
+              new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TResult.class))));
       tmpMap.put(_Fields.IO, new org.apache.thrift.meta_data.FieldMetaData("io", org.apache.thrift.TFieldRequirementType.DEFAULT, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRUCT)));
       tmpMap.put(_Fields.IA, new org.apache.thrift.meta_data.FieldMetaData("ia", org.apache.thrift.TFieldRequirementType.DEFAULT, 
@@ -13683,9 +13683,9 @@ public class HbaseClient {
     }
 
     public getScannerRows_result(
-      List<org.apache.hadoop.hbase.thrift2.generated.TResult> success,
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io,
-      org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument ia)
+      List<TResult> success,
+      TIOError io,
+      TIllegalArgument ia)
     {
       this();
       this.success = success;
@@ -13698,17 +13698,17 @@ public class HbaseClient {
      */
     public getScannerRows_result(getScannerRows_result other) {
       if (other.isSetSuccess()) {
-        List<org.apache.hadoop.hbase.thrift2.generated.TResult> __this__success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TResult>();
-        for (org.apache.hadoop.hbase.thrift2.generated.TResult other_element : other.success) {
-          __this__success.add(new org.apache.hadoop.hbase.thrift2.generated.TResult(other_element));
+        List<TResult> __this__success = new ArrayList<TResult>();
+        for (TResult other_element : other.success) {
+          __this__success.add(new TResult(other_element));
         }
         this.success = __this__success;
       }
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
       if (other.isSetIa()) {
-        this.ia = new org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument(other.ia);
+        this.ia = new TIllegalArgument(other.ia);
       }
     }
 
@@ -13727,22 +13727,22 @@ public class HbaseClient {
       return (this.success == null) ? 0 : this.success.size();
     }
 
-    public java.util.Iterator<org.apache.hadoop.hbase.thrift2.generated.TResult> getSuccessIterator() {
+    public java.util.Iterator<TResult> getSuccessIterator() {
       return (this.success == null) ? null : this.success.iterator();
     }
 
-    public void addToSuccess(org.apache.hadoop.hbase.thrift2.generated.TResult elem) {
+    public void addToSuccess(TResult elem) {
       if (this.success == null) {
-        this.success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TResult>();
+        this.success = new ArrayList<TResult>();
       }
       this.success.add(elem);
     }
 
-    public List<org.apache.hadoop.hbase.thrift2.generated.TResult> getSuccess() {
+    public List<TResult> getSuccess() {
       return this.success;
     }
 
-    public getScannerRows_result setSuccess(List<org.apache.hadoop.hbase.thrift2.generated.TResult> success) {
+    public getScannerRows_result setSuccess(List<TResult> success) {
       this.success = success;
       return this;
     }
@@ -13762,11 +13762,11 @@ public class HbaseClient {
       }
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public getScannerRows_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public getScannerRows_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -13789,14 +13789,14 @@ public class HbaseClient {
     /**
      * if the scannerId is invalid
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument getIa() {
+    public TIllegalArgument getIa() {
       return this.ia;
     }
 
     /**
      * if the scannerId is invalid
      */
-    public getScannerRows_result setIa(org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument ia) {
+    public getScannerRows_result setIa(TIllegalArgument ia) {
       this.ia = ia;
       return this;
     }
@@ -13822,7 +13822,7 @@ public class HbaseClient {
         if (value == null) {
           unsetSuccess();
         } else {
-          setSuccess((List<org.apache.hadoop.hbase.thrift2.generated.TResult>)value);
+          setSuccess((List<TResult>)value);
         }
         break;
 
@@ -13830,7 +13830,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -13838,7 +13838,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIa();
         } else {
-          setIa((org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument)value);
+          setIa((TIllegalArgument)value);
         }
         break;
 
@@ -13983,14 +13983,14 @@ public class HbaseClient {
           case 0: // SUCCESS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list20 = iprot.readListBegin();
-                this.success = new ArrayList<org.apache.hadoop.hbase.thrift2.generated.TResult>(_list20.size);
-                for (int _i21 = 0; _i21 < _list20.size; ++_i21)
+                org.apache.thrift.protocol.TList _list45 = iprot.readListBegin();
+                this.success = new ArrayList<TResult>(_list45.size);
+                for (int _i46 = 0; _i46 < _list45.size; ++_i46)
                 {
-                  org.apache.hadoop.hbase.thrift2.generated.TResult _elem22;
-                  _elem22 = new org.apache.hadoop.hbase.thrift2.generated.TResult();
-                  _elem22.read(iprot);
-                  this.success.add(_elem22);
+                  TResult _elem47;
+                  _elem47 = new TResult();
+                  _elem47.read(iprot);
+                  this.success.add(_elem47);
                 }
                 iprot.readListEnd();
               }
@@ -14000,7 +14000,7 @@ public class HbaseClient {
             break;
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -14008,7 +14008,7 @@ public class HbaseClient {
             break;
           case 2: // IA
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.ia = new org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument();
+              this.ia = new TIllegalArgument();
               this.ia.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -14032,9 +14032,9 @@ public class HbaseClient {
         oprot.writeFieldBegin(SUCCESS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.success.size()));
-          for (org.apache.hadoop.hbase.thrift2.generated.TResult _iter23 : this.success)
+          for (TResult _iter48 : this.success)
           {
-            _iter23.write(oprot);
+            _iter48.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -14425,11 +14425,11 @@ public class HbaseClient {
     private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
     private static final org.apache.thrift.protocol.TField IA_FIELD_DESC = new org.apache.thrift.protocol.TField("ia", org.apache.thrift.protocol.TType.STRUCT, (short)2);
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError io;
+    public TIOError io;
     /**
      * if the scannerId is invalid
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument ia;
+    public TIllegalArgument ia;
 
     /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
     public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -14512,8 +14512,8 @@ public class HbaseClient {
     }
 
     public closeScanner_result(
-      org.apache.hadoop.hbase.thrift2.generated.TIOError io,
-      org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument ia)
+      TIOError io,
+      TIllegalArgument ia)
     {
       this();
       this.io = io;
@@ -14525,10 +14525,10 @@ public class HbaseClient {
      */
     public closeScanner_result(closeScanner_result other) {
       if (other.isSetIo()) {
-        this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError(other.io);
+        this.io = new TIOError(other.io);
       }
       if (other.isSetIa()) {
-        this.ia = new org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument(other.ia);
+        this.ia = new TIllegalArgument(other.ia);
       }
     }
 
@@ -14542,11 +14542,11 @@ public class HbaseClient {
       this.ia = null;
     }
 
-    public org.apache.hadoop.hbase.thrift2.generated.TIOError getIo() {
+    public TIOError getIo() {
       return this.io;
     }
 
-    public closeScanner_result setIo(org.apache.hadoop.hbase.thrift2.generated.TIOError io) {
+    public closeScanner_result setIo(TIOError io) {
       this.io = io;
       return this;
     }
@@ -14569,14 +14569,14 @@ public class HbaseClient {
     /**
      * if the scannerId is invalid
      */
-    public org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument getIa() {
+    public TIllegalArgument getIa() {
       return this.ia;
     }
 
     /**
      * if the scannerId is invalid
      */
-    public closeScanner_result setIa(org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument ia) {
+    public closeScanner_result setIa(TIllegalArgument ia) {
       this.ia = ia;
       return this;
     }
@@ -14602,7 +14602,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIo();
         } else {
-          setIo((org.apache.hadoop.hbase.thrift2.generated.TIOError)value);
+          setIo((TIOError)value);
         }
         break;
 
@@ -14610,7 +14610,7 @@ public class HbaseClient {
         if (value == null) {
           unsetIa();
         } else {
-          setIa((org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument)value);
+          setIa((TIllegalArgument)value);
         }
         break;
 
@@ -14730,7 +14730,7 @@ public class HbaseClient {
         switch (field.id) {
           case 1: // IO
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.io = new org.apache.hadoop.hbase.thrift2.generated.TIOError();
+              this.io = new TIOError();
               this.io.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
@@ -14738,7 +14738,7 @@ public class HbaseClient {
             break;
           case 2: // IA
             if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
-              this.ia = new org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument();
+              this.ia = new TIllegalArgument();
               this.ia.read(iprot);
             } else { 
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
