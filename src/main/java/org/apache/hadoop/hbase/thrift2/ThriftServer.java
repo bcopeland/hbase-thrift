@@ -18,10 +18,16 @@
 
 package org.apache.hadoop.hbase.thrift2;
 
-import org.apache.commons.cli.*;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.OptionGroup;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.PosixParser;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.thrift2.generated.HbaseClient;
+import org.apache.hadoop.hbase.thrift2.generated.THBaseService;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TCompactProtocol;
 import org.apache.thrift.protocol.TProtocolFactory;
@@ -29,7 +35,12 @@ import org.apache.thrift.server.THsHaServer;
 import org.apache.thrift.server.TNonblockingServer;
 import org.apache.thrift.server.TServer;
 import org.apache.thrift.server.TThreadPoolServer;
-import org.apache.thrift.transport.*;
+import org.apache.thrift.transport.TFramedTransport;
+import org.apache.thrift.transport.TNonblockingServerSocket;
+import org.apache.thrift.transport.TNonblockingServerTransport;
+import org.apache.thrift.transport.TServerSocket;
+import org.apache.thrift.transport.TServerTransport;
+import org.apache.thrift.transport.TTransportFactory;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -50,10 +61,10 @@ public class ThriftServer {
   private static void printUsageAndExit(Options options, int exitCode) {
     HelpFormatter formatter = new HelpFormatter();
     formatter.printHelp("Thrift", null, options,
-      "To start the Thrift server run 'bin/hbase-daemon.sh start thrift'\n" +
-        "To shutdown the thrift server run 'bin/hbase-daemon.sh stop thrift' or" +
-        " send a kill signal to the thrift server pid",
-      true);
+        "To start the Thrift server run 'bin/hbase-daemon.sh start thrift'\n" +
+            "To shutdown the thrift server run 'bin/hbase-daemon.sh stop thrift' or" +
+            " send a kill signal to the thrift server pid",
+        true);
     System.exit(exitCode);
   }
 
@@ -68,7 +79,7 @@ public class ThriftServer {
 
     Options options = new Options();
     options.addOption("b", "bind", true,
-      "Address to bind the Thrift server to. Not supported by the Nonblocking and HsHa server [default: 0.0.0.0]");
+        "Address to bind the Thrift server to. Not supported by the Nonblocking and HsHa server [default: 0.0.0.0]");
     options.addOption("p", "port", true, "Port to bind to [default: 9090]");
     options.addOption("f", "framed", false, "Use framed transport");
     options.addOption("c", "compact", false, "Use the compact protocol");
@@ -76,7 +87,7 @@ public class ThriftServer {
 
     OptionGroup servers = new OptionGroup();
     servers.addOption(
-      new Option("nonblocking", false, "Use the TNonblockingServer. This implies the framed transport."));
+        new Option("nonblocking", false, "Use the TNonblockingServer. This implies the framed transport."));
     servers.addOption(new Option("hsha", false, "Use the THsHaServer. This implies the framed transport."));
     servers.addOption(new Option("threadpool", false, "Use the TThreadPoolServer. This is the default."));
     options.addOptionGroup(servers);
@@ -85,9 +96,8 @@ public class ThriftServer {
     CommandLine cmd = parser.parse(options, args);
 
     /**
-     * This is so complicated to please both bin/hbase and bin/hbase-daemon.
-     * hbase-daemon provides "start" and "stop" arguments
-     * hbase should print the help if no argument is provided
+     * This is so complicated to please both bin/hbase and bin/hbase-daemon. hbase-daemon provides "start" and "stop"
+     * arguments hbase should print the help if no argument is provided
      */
     List<String> commandLine = Arrays.asList(args);
     boolean stop = commandLine.contains("stop");
@@ -115,8 +125,8 @@ public class ThriftServer {
       protocolFactory = new TBinaryProtocol.Factory();
     }
 
-    HbaseClient.Iface handler = new ThriftHBaseClientHandler();
-    HbaseClient.Processor processor = new HbaseClient.Processor(handler);
+    THBaseService.Iface handler = new ThriftHBaseServiceHandler();
+    THBaseService.Processor processor = new THBaseService.Processor(handler);
 
     TServer server;
     if (cmd.hasOption("nonblocking") || cmd.hasOption("hsha")) {
@@ -132,10 +142,18 @@ public class ThriftServer {
 
       if (cmd.hasOption("nonblocking")) {
         log.info("starting HBase Nonblocking Thrift server on " + Integer.toString(listenPort));
-        server = new TNonblockingServer(processor, serverTransport, transportFactory, protocolFactory);
+        TNonblockingServer.Args serverArgs = new TNonblockingServer.Args(serverTransport);
+        serverArgs.processor(processor);
+        serverArgs.transportFactory(transportFactory);
+        serverArgs.protocolFactory(protocolFactory);
+        server = new TNonblockingServer(serverArgs);
       } else {
         log.info("starting HBase HsHA Thrift server on " + Integer.toString(listenPort));
-        server = new THsHaServer(processor, serverTransport, transportFactory, protocolFactory);
+        THsHaServer.Args serverArgs = new THsHaServer.Args(serverTransport);
+        serverArgs.processor(processor);
+        serverArgs.transportFactory(transportFactory);
+        serverArgs.protocolFactory(protocolFactory);
+        server = new THsHaServer(serverArgs);
       }
     } else {
       // Get IP address to bind to
@@ -162,7 +180,11 @@ public class ThriftServer {
       }
 
       log.info("starting HBase ThreadPool Thrift server on " + listenAddress + ":" + Integer.toString(listenPort));
-      server = new TThreadPoolServer(processor, serverTransport, transportFactory, protocolFactory);
+      TThreadPoolServer.Args serverArgs = new TThreadPoolServer.Args(serverTransport);
+      serverArgs.processor(processor);
+      serverArgs.transportFactory(transportFactory);
+      serverArgs.protocolFactory(protocolFactory);
+      server = new TThreadPoolServer(serverArgs);
     }
 
     server.serve();
