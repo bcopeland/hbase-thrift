@@ -24,11 +24,11 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.OptionGroup;
 import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.thrift2.generated.THBaseService;
-import org.apache.thrift.TProcessor;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TCompactProtocol;
 import org.apache.thrift.protocol.TProtocolFactory;
@@ -47,7 +47,6 @@ import org.apache.thrift.transport.TTransportFactory;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -57,31 +56,25 @@ import java.util.List;
 public class ThriftServer {
   private static final Log log = LogFactory.getLog("ThriftServer");
 
-  public ThriftServer() {
-    throw new UnsupportedOperationException("Can't initialize class");
-  }
-
-  private static void printUsageAndExit(Options options, int exitCode) {
-    HelpFormatter formatter = new HelpFormatter();
-    formatter.printHelp("Thrift", null, options,
-        "To start the Thrift server run 'bin/hbase-daemon.sh start thrift'\n" +
-            "To shutdown the thrift server run 'bin/hbase-daemon.sh stop thrift' or" +
-            " send a kill signal to the thrift server pid",
-        true);
-    System.exit(exitCode);
-  }
-
   private static final String DEFAULT_LISTEN_PORT = "9090";
 
-  /*
-   * Start up the Thrift server.
-   * @param args
-   */
-  private static void doMain(String[] args) throws Exception {
+  private ThriftServer() {
+  }
+
+  private static void printUsage() {
+    HelpFormatter formatter = new HelpFormatter();
+    formatter.printHelp("Thrift", null, getOptions(),
+        "To start the Thrift server run 'bin/hbase-daemon.sh start thrift2'\n" +
+            "To shutdown the thrift server run 'bin/hbase-daemon.sh stop thrift2' or" +
+            " send a kill signal to the thrift server pid",
+        true);
+  }
+
+  private static Options getOptions() {
     Options options = new Options();
     options.addOption("b", "bind", true,
         "Address to bind the Thrift server to. Not supported by the Nonblocking and HsHa server [default: 0.0.0.0]");
-    options.addOption("p", "port", true, "Port to bind to [default: 9090]");
+    options.addOption("p", "port", true, "Port to bind to [default: " + DEFAULT_LISTEN_PORT + "]");
     options.addOption("f", "framed", false, "Use framed transport");
     options.addOption("c", "compact", false, "Use the compact protocol");
     options.addOption("h", "help", false, "Print help information");
@@ -92,123 +85,53 @@ public class ThriftServer {
     servers.addOption(new Option("hsha", false, "Use the THsHaServer. This implies the framed transport."));
     servers.addOption(new Option("threadpool", false, "Use the TThreadPoolServer. This is the default."));
     options.addOptionGroup(servers);
+    return options;
+  }
 
+  private static CommandLine parseArguments(Options options, String[] args) throws ParseException {
     CommandLineParser parser = new PosixParser();
-    CommandLine cmd = parser.parse(options, args);
-
-    /**
-     * This is so complicated to please both bin/hbase and bin/hbase-daemon. hbase-daemon provides "start" and "stop"
-     * arguments hbase should print the help if no argument is provided
-     */
-    List<String> commandLine = Arrays.asList(args);
-    boolean stop = commandLine.contains("stop");
-    boolean start = commandLine.contains("start");
-
-    String bindValue = cmd.getOptionValue("bind");
-    boolean framed = cmd.hasOption("framed");
-    boolean compact = cmd.hasOption("compact");
-    boolean bind = cmd.hasOption("bind");
-    boolean help = cmd.hasOption("help");
-
-    boolean nonblocking = cmd.hasOption("nonblocking");
-    boolean hsha = cmd.hasOption("hsha");
-
-    if (help || !start || stop) {
-      printUsageAndExit(options, 1);
-    }
-
-    // Get port to bind to
-    int listenPort = 0;
-    try {
-      listenPort = Integer.parseInt(cmd.getOptionValue("port", DEFAULT_LISTEN_PORT));
-    } catch (NumberFormatException e) {
-      log.error("Could not parse the value provided for the port option", e);
-      printUsageAndExit(options, -1);
-    }
-
-    // Construct correct ProtocolFactory
-    TProtocolFactory protocolFactory = getTProtocolFactory(compact);
-    THBaseService.Iface handler = new ThriftHBaseServiceHandler();
-    THBaseService.Processor processor = new THBaseService.Processor(handler);
-
-    TServer server;
-    if (nonblocking || hsha) {
-      // TODO: Remove once HBASE-2155 is resolved
-      if (bind) {
-        log.error("The Nonblocking and HsHa servers don't support IP address binding at the moment." +
-                  " See https://issues.apache.org/jira/browse/HBASE-2155 for details.");
-        printUsageAndExit(options, -1);
-      }
-
-      TNonblockingServerTransport serverTransport = new TNonblockingServerSocket(listenPort);
-      TFramedTransport.Factory transportFactory = new TFramedTransport.Factory();
-
-      if (nonblocking) {
-        log.info("starting HBase Nonblocking Thrift server on " + Integer.toString(listenPort));
-        TNonblockingServer.Args serverArgs = new TNonblockingServer.Args(serverTransport);
-        serverArgs.processor(processor);
-        serverArgs.transportFactory(transportFactory);
-        serverArgs.protocolFactory(protocolFactory);
-        server = new TNonblockingServer(serverArgs);
-      } else {
-        log.info("starting HBase HsHA Thrift server on " + Integer.toString(listenPort));
-        THsHaServer.Args serverArgs = new THsHaServer.Args(serverTransport);
-        serverArgs.processor(processor);
-        serverArgs.transportFactory(transportFactory);
-        serverArgs.protocolFactory(protocolFactory);
-        server = new THsHaServer(serverArgs);
-      }
-    } else {
-      // Get IP address to bind to
-      InetAddress listenAddress = null;
-      if (bind) {
-        try {
-          listenAddress = InetAddress.getByName(bindValue);
-        } catch (UnknownHostException e) {
-          log.error("Could not bind to provided ip address", e);
-          printUsageAndExit(options, -1);
-        }
-      } else {
-        listenAddress = InetAddress.getLocalHost();
-      }
-      TServerTransport serverTransport = new TServerSocket(new InetSocketAddress(listenAddress, listenPort));
-
-      // Construct correct TransportFactory
-      TTransportFactory transportFactory;
-      if (framed) {
-        transportFactory = new TFramedTransport.Factory();
-        log.debug("Using framed transport");
-      } else {
-        transportFactory = new TTransportFactory();
-      }
-
-      log.info("starting HBase ThreadPool Thrift server on " + listenAddress + ":" + Integer.toString(listenPort));
-      TThreadPoolServer.Args serverArgs = new TThreadPoolServer.Args(serverTransport);
-      serverArgs.processor(processor);
-      serverArgs.transportFactory(transportFactory);
-      serverArgs.protocolFactory(protocolFactory);
-      server = new TThreadPoolServer(serverArgs);
-    }
-
-    server.serve();
+    return parser.parse(options, args);
   }
 
   private static TProtocolFactory getTProtocolFactory(boolean isCompact) {
-    // Construct correct ProtocolFactory
-    TProtocolFactory protocolFactory;
     if (isCompact) {
       log.debug("Using compact protocol");
-      protocolFactory = new TCompactProtocol.Factory();
+      return new TCompactProtocol.Factory();
     } else {
       log.debug("Using binary protocol");
-      protocolFactory = new TBinaryProtocol.Factory();
+      return new TBinaryProtocol.Factory();
     }
-    return protocolFactory;
   }
 
-  private static TServer getTNonBlockingServer(TNonblockingServerTransport serverTransport, TProcessor processor,
-      TTransportFactory transportFactory, TProtocolFactory protocolFactory)
-      throws TTransportException {
+  private static TTransportFactory getTTransportFactory(boolean framed) {
+    if (framed) {
+      log.debug("Using framed transport");
+      return new TFramedTransport.Factory();
+    } else {
+      return new TTransportFactory();
+    }
+  }
+
+  /*
+   * If bindValue is null, we don't bind. 
+   */
+  private static InetSocketAddress bindToPort(String bindValue, int listenPort)
+      throws UnknownHostException {
+    try {
+      if (bindValue == null) {
+        return new InetSocketAddress(listenPort);
+      } else {
+        return new InetSocketAddress(InetAddress.getByName(bindValue), listenPort);
+      }
+    } catch (UnknownHostException e) {
+      throw new RuntimeException("Could not bind to provided ip address", e);
+    }
+  }
+
+  private static TServer getTNonBlockingServer(TProtocolFactory protocolFactory, THBaseService.Processor processor,
+      TTransportFactory transportFactory, InetSocketAddress inetSocketAddress) throws TTransportException {
+    TNonblockingServerTransport serverTransport = new TNonblockingServerSocket(inetSocketAddress);
+    log.info("starting HBase Nonblocking Thrift server on " + inetSocketAddress.toString());
     TNonblockingServer.Args serverArgs = new TNonblockingServer.Args(serverTransport);
     serverArgs.processor(processor);
     serverArgs.transportFactory(transportFactory);
@@ -216,9 +139,10 @@ public class ThriftServer {
     return new TNonblockingServer(serverArgs);
   }
 
-  private static TServer getTHsHaServer(TNonblockingServerTransport serverTransport, TProcessor processor,
-      TTransportFactory transportFactory, TProtocolFactory protocolFactory)
-      throws TTransportException {
+  private static TServer getTHsHaServer(TProtocolFactory protocolFactory, THBaseService.Processor processor,
+      TTransportFactory transportFactory, InetSocketAddress inetSocketAddress) throws TTransportException {
+    TNonblockingServerTransport serverTransport = new TNonblockingServerSocket(inetSocketAddress);
+    log.info("starting HBase HsHA Thrift server on " + inetSocketAddress.toString());
     THsHaServer.Args serverArgs = new THsHaServer.Args(serverTransport);
     serverArgs.processor(processor);
     serverArgs.transportFactory(transportFactory);
@@ -226,7 +150,79 @@ public class ThriftServer {
     return new THsHaServer(serverArgs);
   }
 
+  private static TServer getTThreadPoolServer(TProtocolFactory protocolFactory, THBaseService.Processor processor,
+      TTransportFactory transportFactory, InetSocketAddress inetSocketAddress) throws TTransportException {
+    TServerTransport serverTransport = new TServerSocket(inetSocketAddress);
+    log.info("starting HBase ThreadPool Thrift server on " + inetSocketAddress.toString());
+    TThreadPoolServer.Args serverArgs = new TThreadPoolServer.Args(serverTransport);
+    serverArgs.processor(processor);
+    serverArgs.transportFactory(transportFactory);
+    serverArgs.protocolFactory(protocolFactory);
+    return new TThreadPoolServer(serverArgs);
+  }
+
+  /**
+   * Start up the Thrift2 server.
+   * 
+   * @param args
+   */
   public static void main(String[] args) throws Exception {
-    doMain(args);
+    TServer server = null;
+    Options options = getOptions();
+    try {
+      CommandLine cmd = parseArguments(options, args);
+
+      /**
+       * This is to please both bin/hbase and bin/hbase-daemon. hbase-daemon provides "start" and "stop" arguments hbase
+       * should print the help if no argument is provided
+       */
+      List<?> argList = cmd.getArgList();
+      if (cmd.hasOption("help") || !argList.contains("start") || argList.contains("stop")) {
+        printUsage();
+        System.exit(1);
+      }
+
+      // Get port to bind to
+      int listenPort = 0;
+      try {
+        listenPort = Integer.parseInt(cmd.getOptionValue("port", DEFAULT_LISTEN_PORT));
+      } catch (NumberFormatException e) {
+        throw new RuntimeException("Could not parse the value provided for the port option", e);
+      }
+
+      boolean nonblocking = cmd.hasOption("nonblocking");
+      boolean hsha = cmd.hasOption("hsha");
+
+      // Construct correct ProtocolFactory
+      TProtocolFactory protocolFactory = getTProtocolFactory(cmd.hasOption("compact"));
+      THBaseService.Iface handler = new ThriftHBaseServiceHandler();
+      THBaseService.Processor processor = new THBaseService.Processor(handler);
+
+      boolean framed = cmd.hasOption("framed") || nonblocking || hsha;
+      TTransportFactory transportFactory = getTTransportFactory(framed);
+
+      // TODO: Remove once HBASE-2155 is resolved
+      if (cmd.hasOption("bind") && (nonblocking || hsha)) {
+        log.error("The Nonblocking and HsHaServer servers don't support IP address binding at the moment." +
+            " See https://issues.apache.org/jira/browse/HBASE-2155 for details.");
+        printUsage();
+        System.exit(1);
+      }
+
+      InetSocketAddress inetSocketAddress = bindToPort(cmd.getOptionValue("bind"), listenPort);
+
+      if (nonblocking) {
+        server = getTNonBlockingServer(protocolFactory, processor, transportFactory, inetSocketAddress);
+      } else if (hsha) {
+        server = getTHsHaServer(protocolFactory, processor, transportFactory, inetSocketAddress);
+      } else {
+        server = getTThreadPoolServer(protocolFactory, processor, transportFactory, inetSocketAddress);
+      }
+    } catch (Exception e) {
+      log.error(e.getMessage(), e);
+      printUsage();
+      System.exit(1);
+    }
+    server.serve();
   }
 }
