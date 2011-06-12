@@ -56,7 +56,7 @@ struct TColumnValue {
  */
 struct TResult {
   1: required binary row,
-  2: required list<TColumnValue> entries
+  2: required list<TColumnValue> columnValues
 }
 
 /**

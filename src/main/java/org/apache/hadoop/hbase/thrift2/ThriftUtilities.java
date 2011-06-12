@@ -35,13 +35,13 @@ public class ThriftUtilities {
 
   /**
    * Creates a {@link Get} (HBase) from a {@link TGet} (Thrift).
-   *
+   * 
    * This ignores any timestamps set on {@link TColumn} objects.
-   *
+   * 
    * @param in the <code>TGet</code> to convert
-   *
+   * 
    * @return <code>Get</code> object
-   *
+   * 
    * @throws IOException if an invalid time range or max version parameter is given
    */
   public static Get getFromThrift(TGet in) throws IOException {
@@ -75,11 +75,11 @@ public class ThriftUtilities {
 
   /**
    * Converts multiple {@link TGet}s (Thrift) into a list of {@link Get}s (HBase).
-   *
+   * 
    * @param in list of <code>TGet</code>s to convert
-   *
+   * 
    * @return list of <code>Get</code> objects
-   *
+   * 
    * @throws IOException if an invalid time range or max version parameter is given
    * @see #getFromThrift(TGet)
    */
@@ -93,42 +93,40 @@ public class ThriftUtilities {
 
   /**
    * Creates a {@link TResult} (Thrift) from a {@link Result} (HBase).
-   *
+   * 
    * @param in the <code>Result</code> to convert
-   *
+   * 
    * @return converted result, returns an empty result if the input is <code>null</code>
    */
   public static TResult resultFromHBase(Result in) {
-    TResult out = new TResult();
-
-    out.setRow(in.getRow());
-    List<TColumnValue> values = new ArrayList<TColumnValue>();
-
-    // Map<family, Map<qualifier, Map<timestamp, value>>>
-    for (Map.Entry<byte[], NavigableMap<byte[], NavigableMap<Long, byte[]>>> family : in.getMap().entrySet()) {
-      for (Map.Entry<byte[], NavigableMap<Long, byte[]>> qualifier : family.getValue().entrySet()) {
-        for (Map.Entry<Long, byte[]> entry : qualifier.getValue().entrySet()) {
-          TColumnValue col = new TColumnValue();
-          col.setFamily(family.getKey());
-          col.setQualifier(qualifier.getKey());
-          col.setTimestamp(entry.getKey());
-          col.setValue(entry.getValue());
-          values.add(col);
-        }
+    KeyValue[] raw = in.raw();
+    byte[] row = in.getRow();
+    if (row != null) {
+      List<TColumnValue> columnValues = new ArrayList<TColumnValue>();
+      for (KeyValue kv : raw) {
+        TColumnValue col = new TColumnValue();
+        col.setFamily(kv.getFamily());
+        col.setQualifier(kv.getQualifier());
+        col.setTimestamp(kv.getTimestamp());
+        col.setValue(kv.getValue());
+        columnValues.add(col);
       }
+      TResult out = new TResult();
+      out.setRow(row);
+      out.setColumnValues(columnValues);
+      return out;
+    } else {
+      return null;
     }
-
-    out.setEntries(values);
-    return out;
   }
 
   /**
    * Converts multiple {@link Result}s (HBase) into a list of {@link TResult}s (Thrift).
-   *
+   * 
    * @param in array of <code>Result</code>s to convert
-   *
+   * 
    * @return list of converted <code>TResult</code>s
-   *
+   * 
    * @see #resultFromHBase(Result)
    */
   public static List<TResult> resultsFromHBase(Result[] in) {
@@ -141,9 +139,9 @@ public class ThriftUtilities {
 
   /**
    * Creates a {@link Put} (HBase) from a {@link TPut} (Thrift)
-   *
+   * 
    * @param in the <code>TPut</code> to convert
-   *
+   * 
    * @return converted <code>Put</code>
    */
   public static Put putFromThrift(TPut in) {
@@ -160,7 +158,7 @@ public class ThriftUtilities {
     for (TColumnValue columnValue : in.getColumnValues()) {
       if (columnValue.isSetTimestamp()) {
         out.add(columnValue.getFamily(), columnValue.getQualifier(), columnValue.getTimestamp(),
-          columnValue.getValue());
+            columnValue.getValue());
       } else {
         out.add(columnValue.getFamily(), columnValue.getQualifier(), columnValue.getValue());
       }
@@ -171,11 +169,11 @@ public class ThriftUtilities {
 
   /**
    * Converts multiple {@link TPut}s (Thrift) into a list of {@link Put}s (HBase).
-   *
+   * 
    * @param in list of <code>TPut</code>s to convert
-   *
+   * 
    * @return list of converted <code>Put</code>s
-   *
+   * 
    * @see #putFromThrift(TPut)
    */
   public static List<Put> putsFromThrift(List<TPut> in) {
@@ -188,9 +186,9 @@ public class ThriftUtilities {
 
   /**
    * Creates a {@link Delete} (HBase) from a {@link TDelete} (Thrift).
-   *
+   * 
    * @param in the <code>TDelete</code> to convert
-   *
+   * 
    * @return converted <code>Delete</code>
    */
   public static Delete deleteFromThrift(TDelete in) {
@@ -227,11 +225,11 @@ public class ThriftUtilities {
 
   /**
    * Converts multiple {@link TDelete}s (Thrift) into a list of {@link Delete}s (HBase).
-   *
+   * 
    * @param in list of <code>TDelete</code>s to convert
-   *
+   * 
    * @return list of converted <code>Delete</code>s
-   *
+   * 
    * @see #deleteFromThrift(TDelete)
    */
 
@@ -277,9 +275,12 @@ public class ThriftUtilities {
   public static Scan scanFromThrift(TScan in) {
     Scan out = new Scan();
 
-    if (in.isSetStartRow()) out.setStartRow(in.getStartRow());
-    if (in.isSetStopRow()) out.setStopRow(in.getStopRow());
-    if (in.isSetCaching()) out.setCaching(in.getCaching());
+    if (in.isSetStartRow())
+      out.setStartRow(in.getStartRow());
+    if (in.isSetStopRow())
+      out.setStopRow(in.getStopRow());
+    if (in.isSetCaching())
+      out.setCaching(in.getCaching());
 
     // TODO: Timestamps
     if (in.isSetColumns()) {

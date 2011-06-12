@@ -27,15 +27,15 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
   private static final org.apache.thrift.protocol.TStruct STRUCT_DESC = new org.apache.thrift.protocol.TStruct("TResult");
 
   private static final org.apache.thrift.protocol.TField ROW_FIELD_DESC = new org.apache.thrift.protocol.TField("row", org.apache.thrift.protocol.TType.STRING, (short)1);
-  private static final org.apache.thrift.protocol.TField ENTRIES_FIELD_DESC = new org.apache.thrift.protocol.TField("entries", org.apache.thrift.protocol.TType.LIST, (short)2);
+  private static final org.apache.thrift.protocol.TField COLUMN_VALUES_FIELD_DESC = new org.apache.thrift.protocol.TField("columnValues", org.apache.thrift.protocol.TType.LIST, (short)2);
 
   public ByteBuffer row;
-  public List<TColumnValue> entries;
+  public List<TColumnValue> columnValues;
 
   /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
   public enum _Fields implements org.apache.thrift.TFieldIdEnum {
     ROW((short)1, "row"),
-    ENTRIES((short)2, "entries");
+    COLUMN_VALUES((short)2, "columnValues");
 
     private static final Map<String, _Fields> byName = new HashMap<String, _Fields>();
 
@@ -52,8 +52,8 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
       switch(fieldId) {
         case 1: // ROW
           return ROW;
-        case 2: // ENTRIES
-          return ENTRIES;
+        case 2: // COLUMN_VALUES
+          return COLUMN_VALUES;
         default:
           return null;
       }
@@ -100,7 +100,7 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
     Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
     tmpMap.put(_Fields.ROW, new org.apache.thrift.meta_data.FieldMetaData("row", org.apache.thrift.TFieldRequirementType.REQUIRED, 
         new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING        , true)));
-    tmpMap.put(_Fields.ENTRIES, new org.apache.thrift.meta_data.FieldMetaData("entries", org.apache.thrift.TFieldRequirementType.REQUIRED, 
+    tmpMap.put(_Fields.COLUMN_VALUES, new org.apache.thrift.meta_data.FieldMetaData("columnValues", org.apache.thrift.TFieldRequirementType.REQUIRED, 
         new org.apache.thrift.meta_data.ListMetaData(org.apache.thrift.protocol.TType.LIST, 
             new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TColumnValue.class))));
     metaDataMap = Collections.unmodifiableMap(tmpMap);
@@ -112,11 +112,11 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
 
   public TResult(
     ByteBuffer row,
-    List<TColumnValue> entries)
+    List<TColumnValue> columnValues)
   {
     this();
     this.row = row;
-    this.entries = entries;
+    this.columnValues = columnValues;
   }
 
   /**
@@ -127,12 +127,12 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
       this.row = org.apache.thrift.TBaseHelper.copyBinary(other.row);
 ;
     }
-    if (other.isSetEntries()) {
-      List<TColumnValue> __this__entries = new ArrayList<TColumnValue>();
-      for (TColumnValue other_element : other.entries) {
-        __this__entries.add(new TColumnValue(other_element));
+    if (other.isSetColumnValues()) {
+      List<TColumnValue> __this__columnValues = new ArrayList<TColumnValue>();
+      for (TColumnValue other_element : other.columnValues) {
+        __this__columnValues.add(new TColumnValue(other_element));
       }
-      this.entries = __this__entries;
+      this.columnValues = __this__columnValues;
     }
   }
 
@@ -143,7 +143,7 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
   @Override
   public void clear() {
     this.row = null;
-    this.entries = null;
+    this.columnValues = null;
   }
 
   public byte[] getRow() {
@@ -180,42 +180,42 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
     }
   }
 
-  public int getEntriesSize() {
-    return (this.entries == null) ? 0 : this.entries.size();
+  public int getColumnValuesSize() {
+    return (this.columnValues == null) ? 0 : this.columnValues.size();
   }
 
-  public java.util.Iterator<TColumnValue> getEntriesIterator() {
-    return (this.entries == null) ? null : this.entries.iterator();
+  public java.util.Iterator<TColumnValue> getColumnValuesIterator() {
+    return (this.columnValues == null) ? null : this.columnValues.iterator();
   }
 
-  public void addToEntries(TColumnValue elem) {
-    if (this.entries == null) {
-      this.entries = new ArrayList<TColumnValue>();
+  public void addToColumnValues(TColumnValue elem) {
+    if (this.columnValues == null) {
+      this.columnValues = new ArrayList<TColumnValue>();
     }
-    this.entries.add(elem);
+    this.columnValues.add(elem);
   }
 
-  public List<TColumnValue> getEntries() {
-    return this.entries;
+  public List<TColumnValue> getColumnValues() {
+    return this.columnValues;
   }
 
-  public TResult setEntries(List<TColumnValue> entries) {
-    this.entries = entries;
+  public TResult setColumnValues(List<TColumnValue> columnValues) {
+    this.columnValues = columnValues;
     return this;
   }
 
-  public void unsetEntries() {
-    this.entries = null;
+  public void unsetColumnValues() {
+    this.columnValues = null;
   }
 
-  /** Returns true if field entries is set (has been assigned a value) and false otherwise */
-  public boolean isSetEntries() {
-    return this.entries != null;
+  /** Returns true if field columnValues is set (has been assigned a value) and false otherwise */
+  public boolean isSetColumnValues() {
+    return this.columnValues != null;
   }
 
-  public void setEntriesIsSet(boolean value) {
+  public void setColumnValuesIsSet(boolean value) {
     if (!value) {
-      this.entries = null;
+      this.columnValues = null;
     }
   }
 
@@ -229,11 +229,11 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
       }
       break;
 
-    case ENTRIES:
+    case COLUMN_VALUES:
       if (value == null) {
-        unsetEntries();
+        unsetColumnValues();
       } else {
-        setEntries((List<TColumnValue>)value);
+        setColumnValues((List<TColumnValue>)value);
       }
       break;
 
@@ -245,8 +245,8 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
     case ROW:
       return getRow();
 
-    case ENTRIES:
-      return getEntries();
+    case COLUMN_VALUES:
+      return getColumnValues();
 
     }
     throw new IllegalStateException();
@@ -261,8 +261,8 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
     switch (field) {
     case ROW:
       return isSetRow();
-    case ENTRIES:
-      return isSetEntries();
+    case COLUMN_VALUES:
+      return isSetColumnValues();
     }
     throw new IllegalStateException();
   }
@@ -289,12 +289,12 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
         return false;
     }
 
-    boolean this_present_entries = true && this.isSetEntries();
-    boolean that_present_entries = true && that.isSetEntries();
-    if (this_present_entries || that_present_entries) {
-      if (!(this_present_entries && that_present_entries))
+    boolean this_present_columnValues = true && this.isSetColumnValues();
+    boolean that_present_columnValues = true && that.isSetColumnValues();
+    if (this_present_columnValues || that_present_columnValues) {
+      if (!(this_present_columnValues && that_present_columnValues))
         return false;
-      if (!this.entries.equals(that.entries))
+      if (!this.columnValues.equals(that.columnValues))
         return false;
     }
 
@@ -324,12 +324,12 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
         return lastComparison;
       }
     }
-    lastComparison = Boolean.valueOf(isSetEntries()).compareTo(typedOther.isSetEntries());
+    lastComparison = Boolean.valueOf(isSetColumnValues()).compareTo(typedOther.isSetColumnValues());
     if (lastComparison != 0) {
       return lastComparison;
     }
-    if (isSetEntries()) {
-      lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.entries, typedOther.entries);
+    if (isSetColumnValues()) {
+      lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.columnValues, typedOther.columnValues);
       if (lastComparison != 0) {
         return lastComparison;
       }
@@ -358,17 +358,17 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
             org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
           }
           break;
-        case 2: // ENTRIES
+        case 2: // COLUMN_VALUES
           if (field.type == org.apache.thrift.protocol.TType.LIST) {
             {
               org.apache.thrift.protocol.TList _list0 = iprot.readListBegin();
-              this.entries = new ArrayList<TColumnValue>(_list0.size);
+              this.columnValues = new ArrayList<TColumnValue>(_list0.size);
               for (int _i1 = 0; _i1 < _list0.size; ++_i1)
               {
                 TColumnValue _elem2;
                 _elem2 = new TColumnValue();
                 _elem2.read(iprot);
-                this.entries.add(_elem2);
+                this.columnValues.add(_elem2);
               }
               iprot.readListEnd();
             }
@@ -396,11 +396,11 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
       oprot.writeBinary(this.row);
       oprot.writeFieldEnd();
     }
-    if (this.entries != null) {
-      oprot.writeFieldBegin(ENTRIES_FIELD_DESC);
+    if (this.columnValues != null) {
+      oprot.writeFieldBegin(COLUMN_VALUES_FIELD_DESC);
       {
-        oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.entries.size()));
-        for (TColumnValue _iter3 : this.entries)
+        oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.columnValues.size()));
+        for (TColumnValue _iter3 : this.columnValues)
         {
           _iter3.write(oprot);
         }
@@ -425,11 +425,11 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
     }
     first = false;
     if (!first) sb.append(", ");
-    sb.append("entries:");
-    if (this.entries == null) {
+    sb.append("columnValues:");
+    if (this.columnValues == null) {
       sb.append("null");
     } else {
-      sb.append(this.entries);
+      sb.append(this.columnValues);
     }
     first = false;
     sb.append(")");
@@ -441,8 +441,8 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
     if (row == null) {
       throw new org.apache.thrift.protocol.TProtocolException("Required field 'row' was not present! Struct: " + toString());
     }
-    if (entries == null) {
-      throw new org.apache.thrift.protocol.TProtocolException("Required field 'entries' was not present! Struct: " + toString());
+    if (columnValues == null) {
+      throw new org.apache.thrift.protocol.TProtocolException("Required field 'columnValues' was not present! Struct: " + toString());
     }
   }
 
