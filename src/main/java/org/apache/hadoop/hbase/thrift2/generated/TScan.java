@@ -21,7 +21,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * TODO: Filter
+ * Any timestamps in the columns are ignored, use timeRange to select by timestamp.
+ * Max versions defaults to 1.
  */
 public class TScan implements org.apache.thrift.TBase<TScan, TScan._Fields>, java.io.Serializable, Cloneable {
   private static final org.apache.thrift.protocol.TStruct STRUCT_DESC = new org.apache.thrift.protocol.TStruct("TScan");
@@ -139,6 +140,8 @@ public class TScan implements org.apache.thrift.TBase<TScan, TScan._Fields>, jav
   }
 
   public TScan() {
+    this.maxVersions = 1;
+
   }
 
   /**
@@ -180,8 +183,8 @@ public class TScan implements org.apache.thrift.TBase<TScan, TScan._Fields>, jav
     this.columns = null;
     setCachingIsSet(false);
     this.caching = 0;
-    setMaxVersionsIsSet(false);
-    this.maxVersions = 0;
+    this.maxVersions = 1;
+
     this.timeRange = null;
   }
 
@@ -639,14 +642,14 @@ public class TScan implements org.apache.thrift.TBase<TScan, TScan._Fields>, jav
         case 3: // COLUMNS
           if (field.type == org.apache.thrift.protocol.TType.LIST) {
             {
-              org.apache.thrift.protocol.TList _list21 = iprot.readListBegin();
-              this.columns = new ArrayList<TColumn>(_list21.size);
-              for (int _i22 = 0; _i22 < _list21.size; ++_i22)
+              org.apache.thrift.protocol.TList _list20 = iprot.readListBegin();
+              this.columns = new ArrayList<TColumn>(_list20.size);
+              for (int _i21 = 0; _i21 < _list20.size; ++_i21)
               {
-                TColumn _elem23;
-                _elem23 = new TColumn();
-                _elem23.read(iprot);
-                this.columns.add(_elem23);
+                TColumn _elem22;
+                _elem22 = new TColumn();
+                _elem22.read(iprot);
+                this.columns.add(_elem22);
               }
               iprot.readListEnd();
             }
@@ -712,9 +715,9 @@ public class TScan implements org.apache.thrift.TBase<TScan, TScan._Fields>, jav
         oprot.writeFieldBegin(COLUMNS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.columns.size()));
-          for (TColumn _iter24 : this.columns)
+          for (TColumn _iter23 : this.columns)
           {
-            _iter24.write(oprot);
+            _iter23.write(oprot);
           }
           oprot.writeListEnd();
         }

@@ -13,6 +13,7 @@ import org.apache.hadoop.hbase.thrift2.generated.TGet;
 import org.apache.hadoop.hbase.thrift2.generated.THBaseService;
 import org.apache.hadoop.hbase.thrift2.generated.TIOError;
 import org.apache.hadoop.hbase.thrift2.generated.TIllegalArgument;
+import org.apache.hadoop.hbase.thrift2.generated.TIncrement;
 import org.apache.hadoop.hbase.thrift2.generated.TPut;
 import org.apache.hadoop.hbase.thrift2.generated.TResult;
 import org.apache.hadoop.hbase.thrift2.generated.TScan;
@@ -157,14 +158,8 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
   public boolean checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier,
                              ByteBuffer value, TPut put) throws TIOError, TException {
     HTableInterface htable = getTable(table.array());
-
     try {
-      // TODO: Is the value really null?
-      if (value == null) {
-        return htable.checkAndPut(row.array(), family.array(), qualifier.array(), null, putFromThrift(put));
-      } else {
-        return htable.checkAndPut(row.array(), family.array(), qualifier.array(), value.array(), putFromThrift(put));
-      }
+      return htable.checkAndPut(row.array(), family.array(), qualifier.array(), value.array(), putFromThrift(put));
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
@@ -236,6 +231,18 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     HTableInterface htable = getTable(table.array());
     try {
       return htable.incrementColumnValue(row.array(), family.array(), qualifier.array(), amount, writeToWal);
+    } catch (IOException e) {
+      throw getTIOError(e);
+    } finally {
+      putTable(htable);
+    }
+  }
+
+  @Override
+  public TResult increment(ByteBuffer table, TIncrement increment) throws TIOError, TException {
+    HTableInterface htable = getTable(table.array());
+    try {
+      return resultFromHBase(htable.increment(incrementFromThrift(increment)));
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {

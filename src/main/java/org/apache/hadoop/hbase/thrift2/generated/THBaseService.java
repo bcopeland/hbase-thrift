@@ -182,6 +182,8 @@ public class THBaseService {
      */
     public long incrementColumnValue(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, long amount, boolean writeToWal) throws TIOError, org.apache.thrift.TException;
 
+    public TResult increment(ByteBuffer table, TIncrement increment) throws TIOError, org.apache.thrift.TException;
+
     /**
      * Get a Scanner for the provided TScan object.
      * 
@@ -239,6 +241,8 @@ public class THBaseService {
     public void checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TDelete deleteSingle, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.checkAndDelete_call> resultHandler) throws org.apache.thrift.TException;
 
     public void incrementColumnValue(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, long amount, boolean writeToWal, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.incrementColumnValue_call> resultHandler) throws org.apache.thrift.TException;
+
+    public void increment(ByteBuffer table, TIncrement increment, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.increment_call> resultHandler) throws org.apache.thrift.TException;
 
     public void openScanner(ByteBuffer table, TScan scan, org.apache.thrift.async.AsyncMethodCallback<AsyncClient.openScanner_call> resultHandler) throws org.apache.thrift.TException;
 
@@ -727,6 +731,46 @@ public class THBaseService {
         throw result.io;
       }
       throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "incrementColumnValue failed: unknown result");
+    }
+
+    public TResult increment(ByteBuffer table, TIncrement increment) throws TIOError, org.apache.thrift.TException
+    {
+      send_increment(table, increment);
+      return recv_increment();
+    }
+
+    public void send_increment(ByteBuffer table, TIncrement increment) throws org.apache.thrift.TException
+    {
+      oprot_.writeMessageBegin(new org.apache.thrift.protocol.TMessage("increment", org.apache.thrift.protocol.TMessageType.CALL, ++seqid_));
+      increment_args args = new increment_args();
+      args.setTable(table);
+      args.setIncrement(increment);
+      args.write(oprot_);
+      oprot_.writeMessageEnd();
+      oprot_.getTransport().flush();
+    }
+
+    public TResult recv_increment() throws TIOError, org.apache.thrift.TException
+    {
+      org.apache.thrift.protocol.TMessage msg = iprot_.readMessageBegin();
+      if (msg.type == org.apache.thrift.protocol.TMessageType.EXCEPTION) {
+        org.apache.thrift.TApplicationException x = org.apache.thrift.TApplicationException.read(iprot_);
+        iprot_.readMessageEnd();
+        throw x;
+      }
+      if (msg.seqid != seqid_) {
+        throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.BAD_SEQUENCE_ID, "increment failed: out of sequence response");
+      }
+      increment_result result = new increment_result();
+      result.read(iprot_);
+      iprot_.readMessageEnd();
+      if (result.isSetSuccess()) {
+        return result.success;
+      }
+      if (result.io != null) {
+        throw result.io;
+      }
+      throw new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.MISSING_RESULT, "increment failed: unknown result");
     }
 
     public int openScanner(ByteBuffer table, TScan scan) throws TIOError, org.apache.thrift.TException
@@ -1293,6 +1337,41 @@ public class THBaseService {
       }
     }
 
+    public void increment(ByteBuffer table, TIncrement increment, org.apache.thrift.async.AsyncMethodCallback<increment_call> resultHandler) throws org.apache.thrift.TException {
+      checkReady();
+      increment_call method_call = new increment_call(table, increment, resultHandler, this, protocolFactory, transport);
+      this.currentMethod = method_call;
+      manager.call(method_call);
+    }
+
+    public static class increment_call extends org.apache.thrift.async.TAsyncMethodCall {
+      private ByteBuffer table;
+      private TIncrement increment;
+      public increment_call(ByteBuffer table, TIncrement increment, org.apache.thrift.async.AsyncMethodCallback<increment_call> resultHandler, org.apache.thrift.async.TAsyncClient client, org.apache.thrift.protocol.TProtocolFactory protocolFactory, org.apache.thrift.transport.TNonblockingTransport transport) throws org.apache.thrift.TException {
+        super(client, protocolFactory, transport, resultHandler, false);
+        this.table = table;
+        this.increment = increment;
+      }
+
+      public void write_args(org.apache.thrift.protocol.TProtocol prot) throws org.apache.thrift.TException {
+        prot.writeMessageBegin(new org.apache.thrift.protocol.TMessage("increment", org.apache.thrift.protocol.TMessageType.CALL, 0));
+        increment_args args = new increment_args();
+        args.setTable(table);
+        args.setIncrement(increment);
+        args.write(prot);
+        prot.writeMessageEnd();
+      }
+
+      public TResult getResult() throws TIOError, org.apache.thrift.TException {
+        if (getState() != org.apache.thrift.async.TAsyncMethodCall.State.RESPONSE_READ) {
+          throw new IllegalStateException("Method call not finished!");
+        }
+        org.apache.thrift.transport.TMemoryInputTransport memoryTransport = new org.apache.thrift.transport.TMemoryInputTransport(getFrameBuffer().array());
+        org.apache.thrift.protocol.TProtocol prot = client.getProtocolFactory().getProtocol(memoryTransport);
+        return (new Client(prot)).recv_increment();
+      }
+    }
+
     public void openScanner(ByteBuffer table, TScan scan, org.apache.thrift.async.AsyncMethodCallback<openScanner_call> resultHandler) throws org.apache.thrift.TException {
       checkReady();
       openScanner_call method_call = new openScanner_call(table, scan, resultHandler, this, protocolFactory, transport);
@@ -1413,6 +1492,7 @@ public class THBaseService {
       processMap_.put("deleteMultiple", new deleteMultiple());
       processMap_.put("checkAndDelete", new checkAndDelete());
       processMap_.put("incrementColumnValue", new incrementColumnValue());
+      processMap_.put("increment", new increment());
       processMap_.put("openScanner", new openScanner());
       processMap_.put("getScannerRows", new getScannerRows());
       processMap_.put("closeScanner", new closeScanner());
@@ -1858,6 +1938,44 @@ public class THBaseService {
           return;
         }
         oprot.writeMessageBegin(new org.apache.thrift.protocol.TMessage("incrementColumnValue", org.apache.thrift.protocol.TMessageType.REPLY, seqid));
+        result.write(oprot);
+        oprot.writeMessageEnd();
+        oprot.getTransport().flush();
+      }
+
+    }
+
+    private class increment implements ProcessFunction {
+      public void process(int seqid, org.apache.thrift.protocol.TProtocol iprot, org.apache.thrift.protocol.TProtocol oprot) throws org.apache.thrift.TException
+      {
+        increment_args args = new increment_args();
+        try {
+          args.read(iprot);
+        } catch (org.apache.thrift.protocol.TProtocolException e) {
+          iprot.readMessageEnd();
+          org.apache.thrift.TApplicationException x = new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.PROTOCOL_ERROR, e.getMessage());
+          oprot.writeMessageBegin(new org.apache.thrift.protocol.TMessage("increment", org.apache.thrift.protocol.TMessageType.EXCEPTION, seqid));
+          x.write(oprot);
+          oprot.writeMessageEnd();
+          oprot.getTransport().flush();
+          return;
+        }
+        iprot.readMessageEnd();
+        increment_result result = new increment_result();
+        try {
+          result.success = iface_.increment(args.table, args.increment);
+        } catch (TIOError io) {
+          result.io = io;
+        } catch (Throwable th) {
+          LOGGER.error("Internal error processing increment", th);
+          org.apache.thrift.TApplicationException x = new org.apache.thrift.TApplicationException(org.apache.thrift.TApplicationException.INTERNAL_ERROR, "Internal error processing increment");
+          oprot.writeMessageBegin(new org.apache.thrift.protocol.TMessage("increment", org.apache.thrift.protocol.TMessageType.EXCEPTION, seqid));
+          x.write(oprot);
+          oprot.writeMessageEnd();
+          oprot.getTransport().flush();
+          return;
+        }
+        oprot.writeMessageBegin(new org.apache.thrift.protocol.TMessage("increment", org.apache.thrift.protocol.TMessageType.REPLY, seqid));
         result.write(oprot);
         oprot.writeMessageEnd();
         oprot.getTransport().flush();
@@ -3983,14 +4101,14 @@ public class THBaseService {
           case 2: // GETS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list25 = iprot.readListBegin();
-                this.gets = new ArrayList<TGet>(_list25.size);
-                for (int _i26 = 0; _i26 < _list25.size; ++_i26)
+                org.apache.thrift.protocol.TList _list24 = iprot.readListBegin();
+                this.gets = new ArrayList<TGet>(_list24.size);
+                for (int _i25 = 0; _i25 < _list24.size; ++_i25)
                 {
-                  TGet _elem27;
-                  _elem27 = new TGet();
-                  _elem27.read(iprot);
-                  this.gets.add(_elem27);
+                  TGet _elem26;
+                  _elem26 = new TGet();
+                  _elem26.read(iprot);
+                  this.gets.add(_elem26);
                 }
                 iprot.readListEnd();
               }
@@ -4022,9 +4140,9 @@ public class THBaseService {
         oprot.writeFieldBegin(GETS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.gets.size()));
-          for (TGet _iter28 : this.gets)
+          for (TGet _iter27 : this.gets)
           {
-            _iter28.write(oprot);
+            _iter27.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -4406,14 +4524,14 @@ public class THBaseService {
           case 0: // SUCCESS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list29 = iprot.readListBegin();
-                this.success = new ArrayList<TResult>(_list29.size);
-                for (int _i30 = 0; _i30 < _list29.size; ++_i30)
+                org.apache.thrift.protocol.TList _list28 = iprot.readListBegin();
+                this.success = new ArrayList<TResult>(_list28.size);
+                for (int _i29 = 0; _i29 < _list28.size; ++_i29)
                 {
-                  TResult _elem31;
-                  _elem31 = new TResult();
-                  _elem31.read(iprot);
-                  this.success.add(_elem31);
+                  TResult _elem30;
+                  _elem30 = new TResult();
+                  _elem30.read(iprot);
+                  this.success.add(_elem30);
                 }
                 iprot.readListEnd();
               }
@@ -4447,9 +4565,9 @@ public class THBaseService {
         oprot.writeFieldBegin(SUCCESS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.success.size()));
-          for (TResult _iter32 : this.success)
+          for (TResult _iter31 : this.success)
           {
-            _iter32.write(oprot);
+            _iter31.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -6316,7 +6434,7 @@ public class THBaseService {
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.QUALIFIER, new org.apache.thrift.meta_data.FieldMetaData("qualifier", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
-      tmpMap.put(_Fields.VALUE, new org.apache.thrift.meta_data.FieldMetaData("value", org.apache.thrift.TFieldRequirementType.DEFAULT, 
+      tmpMap.put(_Fields.VALUE, new org.apache.thrift.meta_data.FieldMetaData("value", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
       tmpMap.put(_Fields.PUT, new org.apache.thrift.meta_data.FieldMetaData("put", org.apache.thrift.TFieldRequirementType.REQUIRED, 
           new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TPut.class)));
@@ -7042,6 +7160,9 @@ public class THBaseService {
       }
       if (qualifier == null) {
         throw new org.apache.thrift.protocol.TProtocolException("Required field 'qualifier' was not present! Struct: " + toString());
+      }
+      if (value == null) {
+        throw new org.apache.thrift.protocol.TProtocolException("Required field 'value' was not present! Struct: " + toString());
       }
       if (put == null) {
         throw new org.apache.thrift.protocol.TProtocolException("Required field 'put' was not present! Struct: " + toString());
@@ -7813,14 +7934,14 @@ public class THBaseService {
           case 2: // PUTS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list33 = iprot.readListBegin();
-                this.puts = new ArrayList<TPut>(_list33.size);
-                for (int _i34 = 0; _i34 < _list33.size; ++_i34)
+                org.apache.thrift.protocol.TList _list32 = iprot.readListBegin();
+                this.puts = new ArrayList<TPut>(_list32.size);
+                for (int _i33 = 0; _i33 < _list32.size; ++_i33)
                 {
-                  TPut _elem35;
-                  _elem35 = new TPut();
-                  _elem35.read(iprot);
-                  this.puts.add(_elem35);
+                  TPut _elem34;
+                  _elem34 = new TPut();
+                  _elem34.read(iprot);
+                  this.puts.add(_elem34);
                 }
                 iprot.readListEnd();
               }
@@ -7852,9 +7973,9 @@ public class THBaseService {
         oprot.writeFieldBegin(PUTS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.puts.size()));
-          for (TPut _iter36 : this.puts)
+          for (TPut _iter35 : this.puts)
           {
-            _iter36.write(oprot);
+            _iter35.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -9300,14 +9421,14 @@ public class THBaseService {
           case 2: // DELETES
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list37 = iprot.readListBegin();
-                this.deletes = new ArrayList<TDelete>(_list37.size);
-                for (int _i38 = 0; _i38 < _list37.size; ++_i38)
+                org.apache.thrift.protocol.TList _list36 = iprot.readListBegin();
+                this.deletes = new ArrayList<TDelete>(_list36.size);
+                for (int _i37 = 0; _i37 < _list36.size; ++_i37)
                 {
-                  TDelete _elem39;
-                  _elem39 = new TDelete();
-                  _elem39.read(iprot);
-                  this.deletes.add(_elem39);
+                  TDelete _elem38;
+                  _elem38 = new TDelete();
+                  _elem38.read(iprot);
+                  this.deletes.add(_elem38);
                 }
                 iprot.readListEnd();
               }
@@ -9339,9 +9460,9 @@ public class THBaseService {
         oprot.writeFieldBegin(DELETES_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.deletes.size()));
-          for (TDelete _iter40 : this.deletes)
+          for (TDelete _iter39 : this.deletes)
           {
-            _iter40.write(oprot);
+            _iter39.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -9723,14 +9844,14 @@ public class THBaseService {
           case 0: // SUCCESS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list41 = iprot.readListBegin();
-                this.success = new ArrayList<TDelete>(_list41.size);
-                for (int _i42 = 0; _i42 < _list41.size; ++_i42)
+                org.apache.thrift.protocol.TList _list40 = iprot.readListBegin();
+                this.success = new ArrayList<TDelete>(_list40.size);
+                for (int _i41 = 0; _i41 < _list40.size; ++_i41)
                 {
-                  TDelete _elem43;
-                  _elem43 = new TDelete();
-                  _elem43.read(iprot);
-                  this.success.add(_elem43);
+                  TDelete _elem42;
+                  _elem42 = new TDelete();
+                  _elem42.read(iprot);
+                  this.success.add(_elem42);
                 }
                 iprot.readListEnd();
               }
@@ -9764,9 +9885,9 @@ public class THBaseService {
         oprot.writeFieldBegin(SUCCESS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.success.size()));
-          for (TDelete _iter44 : this.success)
+          for (TDelete _iter43 : this.success)
           {
-            _iter44.write(oprot);
+            _iter43.write(oprot);
           }
           oprot.writeListEnd();
         }
@@ -12358,6 +12479,820 @@ public class THBaseService {
 
   }
 
+  public static class increment_args implements org.apache.thrift.TBase<increment_args, increment_args._Fields>, java.io.Serializable, Cloneable   {
+    private static final org.apache.thrift.protocol.TStruct STRUCT_DESC = new org.apache.thrift.protocol.TStruct("increment_args");
+
+    private static final org.apache.thrift.protocol.TField TABLE_FIELD_DESC = new org.apache.thrift.protocol.TField("table", org.apache.thrift.protocol.TType.STRING, (short)1);
+    private static final org.apache.thrift.protocol.TField INCREMENT_FIELD_DESC = new org.apache.thrift.protocol.TField("increment", org.apache.thrift.protocol.TType.STRUCT, (short)2);
+
+    /**
+     * the table to increment the value on
+     */
+    public ByteBuffer table;
+    /**
+     * the TIncrement to increment
+     */
+    public TIncrement increment;
+
+    /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
+    public enum _Fields implements org.apache.thrift.TFieldIdEnum {
+      /**
+       * the table to increment the value on
+       */
+      TABLE((short)1, "table"),
+      /**
+       * the TIncrement to increment
+       */
+      INCREMENT((short)2, "increment");
+
+      private static final Map<String, _Fields> byName = new HashMap<String, _Fields>();
+
+      static {
+        for (_Fields field : EnumSet.allOf(_Fields.class)) {
+          byName.put(field.getFieldName(), field);
+        }
+      }
+
+      /**
+       * Find the _Fields constant that matches fieldId, or null if its not found.
+       */
+      public static _Fields findByThriftId(int fieldId) {
+        switch(fieldId) {
+          case 1: // TABLE
+            return TABLE;
+          case 2: // INCREMENT
+            return INCREMENT;
+          default:
+            return null;
+        }
+      }
+
+      /**
+       * Find the _Fields constant that matches fieldId, throwing an exception
+       * if it is not found.
+       */
+      public static _Fields findByThriftIdOrThrow(int fieldId) {
+        _Fields fields = findByThriftId(fieldId);
+        if (fields == null) throw new IllegalArgumentException("Field " + fieldId + " doesn't exist!");
+        return fields;
+      }
+
+      /**
+       * Find the _Fields constant that matches name, or null if its not found.
+       */
+      public static _Fields findByName(String name) {
+        return byName.get(name);
+      }
+
+      private final short _thriftId;
+      private final String _fieldName;
+
+      _Fields(short thriftId, String fieldName) {
+        _thriftId = thriftId;
+        _fieldName = fieldName;
+      }
+
+      public short getThriftFieldId() {
+        return _thriftId;
+      }
+
+      public String getFieldName() {
+        return _fieldName;
+      }
+    }
+
+    // isset id assignments
+
+    public static final Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> metaDataMap;
+    static {
+      Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
+      tmpMap.put(_Fields.TABLE, new org.apache.thrift.meta_data.FieldMetaData("table", org.apache.thrift.TFieldRequirementType.REQUIRED, 
+          new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING          , true)));
+      tmpMap.put(_Fields.INCREMENT, new org.apache.thrift.meta_data.FieldMetaData("increment", org.apache.thrift.TFieldRequirementType.REQUIRED, 
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TIncrement.class)));
+      metaDataMap = Collections.unmodifiableMap(tmpMap);
+      org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(increment_args.class, metaDataMap);
+    }
+
+    public increment_args() {
+    }
+
+    public increment_args(
+      ByteBuffer table,
+      TIncrement increment)
+    {
+      this();
+      this.table = table;
+      this.increment = increment;
+    }
+
+    /**
+     * Performs a deep copy on <i>other</i>.
+     */
+    public increment_args(increment_args other) {
+      if (other.isSetTable()) {
+        this.table = org.apache.thrift.TBaseHelper.copyBinary(other.table);
+;
+      }
+      if (other.isSetIncrement()) {
+        this.increment = new TIncrement(other.increment);
+      }
+    }
+
+    public increment_args deepCopy() {
+      return new increment_args(this);
+    }
+
+    @Override
+    public void clear() {
+      this.table = null;
+      this.increment = null;
+    }
+
+    /**
+     * the table to increment the value on
+     */
+    public byte[] getTable() {
+      setTable(org.apache.thrift.TBaseHelper.rightSize(table));
+      return table == null ? null : table.array();
+    }
+
+    public ByteBuffer bufferForTable() {
+      return table;
+    }
+
+    /**
+     * the table to increment the value on
+     */
+    public increment_args setTable(byte[] table) {
+      setTable(table == null ? (ByteBuffer)null : ByteBuffer.wrap(table));
+      return this;
+    }
+
+    public increment_args setTable(ByteBuffer table) {
+      this.table = table;
+      return this;
+    }
+
+    public void unsetTable() {
+      this.table = null;
+    }
+
+    /** Returns true if field table is set (has been assigned a value) and false otherwise */
+    public boolean isSetTable() {
+      return this.table != null;
+    }
+
+    public void setTableIsSet(boolean value) {
+      if (!value) {
+        this.table = null;
+      }
+    }
+
+    /**
+     * the TIncrement to increment
+     */
+    public TIncrement getIncrement() {
+      return this.increment;
+    }
+
+    /**
+     * the TIncrement to increment
+     */
+    public increment_args setIncrement(TIncrement increment) {
+      this.increment = increment;
+      return this;
+    }
+
+    public void unsetIncrement() {
+      this.increment = null;
+    }
+
+    /** Returns true if field increment is set (has been assigned a value) and false otherwise */
+    public boolean isSetIncrement() {
+      return this.increment != null;
+    }
+
+    public void setIncrementIsSet(boolean value) {
+      if (!value) {
+        this.increment = null;
+      }
+    }
+
+    public void setFieldValue(_Fields field, Object value) {
+      switch (field) {
+      case TABLE:
+        if (value == null) {
+          unsetTable();
+        } else {
+          setTable((ByteBuffer)value);
+        }
+        break;
+
+      case INCREMENT:
+        if (value == null) {
+          unsetIncrement();
+        } else {
+          setIncrement((TIncrement)value);
+        }
+        break;
+
+      }
+    }
+
+    public Object getFieldValue(_Fields field) {
+      switch (field) {
+      case TABLE:
+        return getTable();
+
+      case INCREMENT:
+        return getIncrement();
+
+      }
+      throw new IllegalStateException();
+    }
+
+    /** Returns true if field corresponding to fieldID is set (has been assigned a value) and false otherwise */
+    public boolean isSet(_Fields field) {
+      if (field == null) {
+        throw new IllegalArgumentException();
+      }
+
+      switch (field) {
+      case TABLE:
+        return isSetTable();
+      case INCREMENT:
+        return isSetIncrement();
+      }
+      throw new IllegalStateException();
+    }
+
+    @Override
+    public boolean equals(Object that) {
+      if (that == null)
+        return false;
+      if (that instanceof increment_args)
+        return this.equals((increment_args)that);
+      return false;
+    }
+
+    public boolean equals(increment_args that) {
+      if (that == null)
+        return false;
+
+      boolean this_present_table = true && this.isSetTable();
+      boolean that_present_table = true && that.isSetTable();
+      if (this_present_table || that_present_table) {
+        if (!(this_present_table && that_present_table))
+          return false;
+        if (!this.table.equals(that.table))
+          return false;
+      }
+
+      boolean this_present_increment = true && this.isSetIncrement();
+      boolean that_present_increment = true && that.isSetIncrement();
+      if (this_present_increment || that_present_increment) {
+        if (!(this_present_increment && that_present_increment))
+          return false;
+        if (!this.increment.equals(that.increment))
+          return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      return 0;
+    }
+
+    public int compareTo(increment_args other) {
+      if (!getClass().equals(other.getClass())) {
+        return getClass().getName().compareTo(other.getClass().getName());
+      }
+
+      int lastComparison = 0;
+      increment_args typedOther = (increment_args)other;
+
+      lastComparison = Boolean.valueOf(isSetTable()).compareTo(typedOther.isSetTable());
+      if (lastComparison != 0) {
+        return lastComparison;
+      }
+      if (isSetTable()) {
+        lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.table, typedOther.table);
+        if (lastComparison != 0) {
+          return lastComparison;
+        }
+      }
+      lastComparison = Boolean.valueOf(isSetIncrement()).compareTo(typedOther.isSetIncrement());
+      if (lastComparison != 0) {
+        return lastComparison;
+      }
+      if (isSetIncrement()) {
+        lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.increment, typedOther.increment);
+        if (lastComparison != 0) {
+          return lastComparison;
+        }
+      }
+      return 0;
+    }
+
+    public _Fields fieldForId(int fieldId) {
+      return _Fields.findByThriftId(fieldId);
+    }
+
+    public void read(org.apache.thrift.protocol.TProtocol iprot) throws org.apache.thrift.TException {
+      org.apache.thrift.protocol.TField field;
+      iprot.readStructBegin();
+      while (true)
+      {
+        field = iprot.readFieldBegin();
+        if (field.type == org.apache.thrift.protocol.TType.STOP) { 
+          break;
+        }
+        switch (field.id) {
+          case 1: // TABLE
+            if (field.type == org.apache.thrift.protocol.TType.STRING) {
+              this.table = iprot.readBinary();
+            } else { 
+              org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
+            }
+            break;
+          case 2: // INCREMENT
+            if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
+              this.increment = new TIncrement();
+              this.increment.read(iprot);
+            } else { 
+              org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
+            }
+            break;
+          default:
+            org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
+        }
+        iprot.readFieldEnd();
+      }
+      iprot.readStructEnd();
+
+      // check for required fields of primitive type, which can't be checked in the validate method
+      validate();
+    }
+
+    public void write(org.apache.thrift.protocol.TProtocol oprot) throws org.apache.thrift.TException {
+      validate();
+
+      oprot.writeStructBegin(STRUCT_DESC);
+      if (this.table != null) {
+        oprot.writeFieldBegin(TABLE_FIELD_DESC);
+        oprot.writeBinary(this.table);
+        oprot.writeFieldEnd();
+      }
+      if (this.increment != null) {
+        oprot.writeFieldBegin(INCREMENT_FIELD_DESC);
+        this.increment.write(oprot);
+        oprot.writeFieldEnd();
+      }
+      oprot.writeFieldStop();
+      oprot.writeStructEnd();
+    }
+
+    @Override
+    public String toString() {
+      StringBuilder sb = new StringBuilder("increment_args(");
+      boolean first = true;
+
+      sb.append("table:");
+      if (this.table == null) {
+        sb.append("null");
+      } else {
+        org.apache.thrift.TBaseHelper.toString(this.table, sb);
+      }
+      first = false;
+      if (!first) sb.append(", ");
+      sb.append("increment:");
+      if (this.increment == null) {
+        sb.append("null");
+      } else {
+        sb.append(this.increment);
+      }
+      first = false;
+      sb.append(")");
+      return sb.toString();
+    }
+
+    public void validate() throws org.apache.thrift.TException {
+      // check for required fields
+      if (table == null) {
+        throw new org.apache.thrift.protocol.TProtocolException("Required field 'table' was not present! Struct: " + toString());
+      }
+      if (increment == null) {
+        throw new org.apache.thrift.protocol.TProtocolException("Required field 'increment' was not present! Struct: " + toString());
+      }
+    }
+
+    private void writeObject(java.io.ObjectOutputStream out) throws java.io.IOException {
+      try {
+        write(new org.apache.thrift.protocol.TCompactProtocol(new org.apache.thrift.transport.TIOStreamTransport(out)));
+      } catch (org.apache.thrift.TException te) {
+        throw new java.io.IOException(te);
+      }
+    }
+
+    private void readObject(java.io.ObjectInputStream in) throws java.io.IOException, ClassNotFoundException {
+      try {
+        read(new org.apache.thrift.protocol.TCompactProtocol(new org.apache.thrift.transport.TIOStreamTransport(in)));
+      } catch (org.apache.thrift.TException te) {
+        throw new java.io.IOException(te);
+      }
+    }
+
+  }
+
+  public static class increment_result implements org.apache.thrift.TBase<increment_result, increment_result._Fields>, java.io.Serializable, Cloneable   {
+    private static final org.apache.thrift.protocol.TStruct STRUCT_DESC = new org.apache.thrift.protocol.TStruct("increment_result");
+
+    private static final org.apache.thrift.protocol.TField SUCCESS_FIELD_DESC = new org.apache.thrift.protocol.TField("success", org.apache.thrift.protocol.TType.STRUCT, (short)0);
+    private static final org.apache.thrift.protocol.TField IO_FIELD_DESC = new org.apache.thrift.protocol.TField("io", org.apache.thrift.protocol.TType.STRUCT, (short)1);
+
+    public TResult success;
+    public TIOError io;
+
+    /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
+    public enum _Fields implements org.apache.thrift.TFieldIdEnum {
+      SUCCESS((short)0, "success"),
+      IO((short)1, "io");
+
+      private static final Map<String, _Fields> byName = new HashMap<String, _Fields>();
+
+      static {
+        for (_Fields field : EnumSet.allOf(_Fields.class)) {
+          byName.put(field.getFieldName(), field);
+        }
+      }
+
+      /**
+       * Find the _Fields constant that matches fieldId, or null if its not found.
+       */
+      public static _Fields findByThriftId(int fieldId) {
+        switch(fieldId) {
+          case 0: // SUCCESS
+            return SUCCESS;
+          case 1: // IO
+            return IO;
+          default:
+            return null;
+        }
+      }
+
+      /**
+       * Find the _Fields constant that matches fieldId, throwing an exception
+       * if it is not found.
+       */
+      public static _Fields findByThriftIdOrThrow(int fieldId) {
+        _Fields fields = findByThriftId(fieldId);
+        if (fields == null) throw new IllegalArgumentException("Field " + fieldId + " doesn't exist!");
+        return fields;
+      }
+
+      /**
+       * Find the _Fields constant that matches name, or null if its not found.
+       */
+      public static _Fields findByName(String name) {
+        return byName.get(name);
+      }
+
+      private final short _thriftId;
+      private final String _fieldName;
+
+      _Fields(short thriftId, String fieldName) {
+        _thriftId = thriftId;
+        _fieldName = fieldName;
+      }
+
+      public short getThriftFieldId() {
+        return _thriftId;
+      }
+
+      public String getFieldName() {
+        return _fieldName;
+      }
+    }
+
+    // isset id assignments
+
+    public static final Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> metaDataMap;
+    static {
+      Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
+      tmpMap.put(_Fields.SUCCESS, new org.apache.thrift.meta_data.FieldMetaData("success", org.apache.thrift.TFieldRequirementType.DEFAULT, 
+          new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TResult.class)));
+      tmpMap.put(_Fields.IO, new org.apache.thrift.meta_data.FieldMetaData("io", org.apache.thrift.TFieldRequirementType.DEFAULT, 
+          new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRUCT)));
+      metaDataMap = Collections.unmodifiableMap(tmpMap);
+      org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(increment_result.class, metaDataMap);
+    }
+
+    public increment_result() {
+    }
+
+    public increment_result(
+      TResult success,
+      TIOError io)
+    {
+      this();
+      this.success = success;
+      this.io = io;
+    }
+
+    /**
+     * Performs a deep copy on <i>other</i>.
+     */
+    public increment_result(increment_result other) {
+      if (other.isSetSuccess()) {
+        this.success = new TResult(other.success);
+      }
+      if (other.isSetIo()) {
+        this.io = new TIOError(other.io);
+      }
+    }
+
+    public increment_result deepCopy() {
+      return new increment_result(this);
+    }
+
+    @Override
+    public void clear() {
+      this.success = null;
+      this.io = null;
+    }
+
+    public TResult getSuccess() {
+      return this.success;
+    }
+
+    public increment_result setSuccess(TResult success) {
+      this.success = success;
+      return this;
+    }
+
+    public void unsetSuccess() {
+      this.success = null;
+    }
+
+    /** Returns true if field success is set (has been assigned a value) and false otherwise */
+    public boolean isSetSuccess() {
+      return this.success != null;
+    }
+
+    public void setSuccessIsSet(boolean value) {
+      if (!value) {
+        this.success = null;
+      }
+    }
+
+    public TIOError getIo() {
+      return this.io;
+    }
+
+    public increment_result setIo(TIOError io) {
+      this.io = io;
+      return this;
+    }
+
+    public void unsetIo() {
+      this.io = null;
+    }
+
+    /** Returns true if field io is set (has been assigned a value) and false otherwise */
+    public boolean isSetIo() {
+      return this.io != null;
+    }
+
+    public void setIoIsSet(boolean value) {
+      if (!value) {
+        this.io = null;
+      }
+    }
+
+    public void setFieldValue(_Fields field, Object value) {
+      switch (field) {
+      case SUCCESS:
+        if (value == null) {
+          unsetSuccess();
+        } else {
+          setSuccess((TResult)value);
+        }
+        break;
+
+      case IO:
+        if (value == null) {
+          unsetIo();
+        } else {
+          setIo((TIOError)value);
+        }
+        break;
+
+      }
+    }
+
+    public Object getFieldValue(_Fields field) {
+      switch (field) {
+      case SUCCESS:
+        return getSuccess();
+
+      case IO:
+        return getIo();
+
+      }
+      throw new IllegalStateException();
+    }
+
+    /** Returns true if field corresponding to fieldID is set (has been assigned a value) and false otherwise */
+    public boolean isSet(_Fields field) {
+      if (field == null) {
+        throw new IllegalArgumentException();
+      }
+
+      switch (field) {
+      case SUCCESS:
+        return isSetSuccess();
+      case IO:
+        return isSetIo();
+      }
+      throw new IllegalStateException();
+    }
+
+    @Override
+    public boolean equals(Object that) {
+      if (that == null)
+        return false;
+      if (that instanceof increment_result)
+        return this.equals((increment_result)that);
+      return false;
+    }
+
+    public boolean equals(increment_result that) {
+      if (that == null)
+        return false;
+
+      boolean this_present_success = true && this.isSetSuccess();
+      boolean that_present_success = true && that.isSetSuccess();
+      if (this_present_success || that_present_success) {
+        if (!(this_present_success && that_present_success))
+          return false;
+        if (!this.success.equals(that.success))
+          return false;
+      }
+
+      boolean this_present_io = true && this.isSetIo();
+      boolean that_present_io = true && that.isSetIo();
+      if (this_present_io || that_present_io) {
+        if (!(this_present_io && that_present_io))
+          return false;
+        if (!this.io.equals(that.io))
+          return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      return 0;
+    }
+
+    public int compareTo(increment_result other) {
+      if (!getClass().equals(other.getClass())) {
+        return getClass().getName().compareTo(other.getClass().getName());
+      }
+
+      int lastComparison = 0;
+      increment_result typedOther = (increment_result)other;
+
+      lastComparison = Boolean.valueOf(isSetSuccess()).compareTo(typedOther.isSetSuccess());
+      if (lastComparison != 0) {
+        return lastComparison;
+      }
+      if (isSetSuccess()) {
+        lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.success, typedOther.success);
+        if (lastComparison != 0) {
+          return lastComparison;
+        }
+      }
+      lastComparison = Boolean.valueOf(isSetIo()).compareTo(typedOther.isSetIo());
+      if (lastComparison != 0) {
+        return lastComparison;
+      }
+      if (isSetIo()) {
+        lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.io, typedOther.io);
+        if (lastComparison != 0) {
+          return lastComparison;
+        }
+      }
+      return 0;
+    }
+
+    public _Fields fieldForId(int fieldId) {
+      return _Fields.findByThriftId(fieldId);
+    }
+
+    public void read(org.apache.thrift.protocol.TProtocol iprot) throws org.apache.thrift.TException {
+      org.apache.thrift.protocol.TField field;
+      iprot.readStructBegin();
+      while (true)
+      {
+        field = iprot.readFieldBegin();
+        if (field.type == org.apache.thrift.protocol.TType.STOP) { 
+          break;
+        }
+        switch (field.id) {
+          case 0: // SUCCESS
+            if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
+              this.success = new TResult();
+              this.success.read(iprot);
+            } else { 
+              org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
+            }
+            break;
+          case 1: // IO
+            if (field.type == org.apache.thrift.protocol.TType.STRUCT) {
+              this.io = new TIOError();
+              this.io.read(iprot);
+            } else { 
+              org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
+            }
+            break;
+          default:
+            org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
+        }
+        iprot.readFieldEnd();
+      }
+      iprot.readStructEnd();
+
+      // check for required fields of primitive type, which can't be checked in the validate method
+      validate();
+    }
+
+    public void write(org.apache.thrift.protocol.TProtocol oprot) throws org.apache.thrift.TException {
+      oprot.writeStructBegin(STRUCT_DESC);
+
+      if (this.isSetSuccess()) {
+        oprot.writeFieldBegin(SUCCESS_FIELD_DESC);
+        this.success.write(oprot);
+        oprot.writeFieldEnd();
+      } else if (this.isSetIo()) {
+        oprot.writeFieldBegin(IO_FIELD_DESC);
+        this.io.write(oprot);
+        oprot.writeFieldEnd();
+      }
+      oprot.writeFieldStop();
+      oprot.writeStructEnd();
+    }
+
+    @Override
+    public String toString() {
+      StringBuilder sb = new StringBuilder("increment_result(");
+      boolean first = true;
+
+      sb.append("success:");
+      if (this.success == null) {
+        sb.append("null");
+      } else {
+        sb.append(this.success);
+      }
+      first = false;
+      if (!first) sb.append(", ");
+      sb.append("io:");
+      if (this.io == null) {
+        sb.append("null");
+      } else {
+        sb.append(this.io);
+      }
+      first = false;
+      sb.append(")");
+      return sb.toString();
+    }
+
+    public void validate() throws org.apache.thrift.TException {
+      // check for required fields
+    }
+
+    private void writeObject(java.io.ObjectOutputStream out) throws java.io.IOException {
+      try {
+        write(new org.apache.thrift.protocol.TCompactProtocol(new org.apache.thrift.transport.TIOStreamTransport(out)));
+      } catch (org.apache.thrift.TException te) {
+        throw new java.io.IOException(te);
+      }
+    }
+
+    private void readObject(java.io.ObjectInputStream in) throws java.io.IOException, ClassNotFoundException {
+      try {
+        read(new org.apache.thrift.protocol.TCompactProtocol(new org.apache.thrift.transport.TIOStreamTransport(in)));
+      } catch (org.apache.thrift.TException te) {
+        throw new java.io.IOException(te);
+      }
+    }
+
+  }
+
   public static class openScanner_args implements org.apache.thrift.TBase<openScanner_args, openScanner_args._Fields>, java.io.Serializable, Cloneable   {
     private static final org.apache.thrift.protocol.TStruct STRUCT_DESC = new org.apache.thrift.protocol.TStruct("openScanner_args");
 
@@ -13983,14 +14918,14 @@ public class THBaseService {
           case 0: // SUCCESS
             if (field.type == org.apache.thrift.protocol.TType.LIST) {
               {
-                org.apache.thrift.protocol.TList _list45 = iprot.readListBegin();
-                this.success = new ArrayList<TResult>(_list45.size);
-                for (int _i46 = 0; _i46 < _list45.size; ++_i46)
+                org.apache.thrift.protocol.TList _list44 = iprot.readListBegin();
+                this.success = new ArrayList<TResult>(_list44.size);
+                for (int _i45 = 0; _i45 < _list44.size; ++_i45)
                 {
-                  TResult _elem47;
-                  _elem47 = new TResult();
-                  _elem47.read(iprot);
-                  this.success.add(_elem47);
+                  TResult _elem46;
+                  _elem46 = new TResult();
+                  _elem46.read(iprot);
+                  this.success.add(_elem46);
                 }
                 iprot.readListEnd();
               }
@@ -14032,9 +14967,9 @@ public class THBaseService {
         oprot.writeFieldBegin(SUCCESS_FIELD_DESC);
         {
           oprot.writeListBegin(new org.apache.thrift.protocol.TList(org.apache.thrift.protocol.TType.STRUCT, this.success.size()));
-          for (TResult _iter48 : this.success)
+          for (TResult _iter47 : this.success)
           {
-            _iter48.write(oprot);
+            _iter47.write(oprot);
           }
           oprot.writeListEnd();
         }

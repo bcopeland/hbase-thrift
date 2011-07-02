@@ -52,10 +52,19 @@ struct TColumnValue {
 }
 
 /**
- * TODO: optional bool "empty"?
+ * Represents a single cell and the amount to increment it by
+ */ 
+struct TColumnIncrement {
+  1: required binary family,
+  2: required binary qualifier,
+  3: optional i64 amount = 1
+}
+
+/**
+ * if no Result is found, row and columnValues will not be set.
  */
 struct TResult {
-  1: required binary row,
+  1: optional binary row,
   2: required list<TColumnValue> columnValues
 }
 
@@ -133,18 +142,20 @@ struct TDelete {
 
 struct TIncrement {
   1: required binary row,
-  2: required map<TColumn, i64> columns
+  2: required list<TColumnIncrement> columns,
+  3: optional bool writeToWal = 1
 }
 
 /**
- * TODO: Filter
+ * Any timestamps in the columns are ignored, use timeRange to select by timestamp.
+ * Max versions defaults to 1.
  */
 struct TScan {
   1: optional binary startRow,
   2: optional binary stopRow,
   3: optional list<TColumn> columns
   4: optional i32 caching,
-  5: optional i32 maxVersions,
+  5: optional i32 maxVersions=1,
   6: optional TTimeRange timeRange,
 }
 
@@ -267,7 +278,7 @@ service THBaseService {
     /** the expected value, if not provided the
         check is for the non-existence of the
         column in question */
-    5: optional binary value,
+    5: required binary value,
 
     /** the TPut to put if the check succeeds */
     6: required TPut put
@@ -335,7 +346,7 @@ service THBaseService {
     /** the expected value, if not provided the
         check is for the non-existence of the
         column in question */
-    5: optional binary value,
+    5: binary value,
 
     /** the TDelete to execute if the check succeeds */
     6: required TDelete deleteSingle
@@ -358,10 +369,18 @@ service THBaseService {
     4: required binary qualifier,
 
     /** the amount by which the value should be incremented */
-    5: optional i64 amount = 1,
+    5: i64 amount = 1,
 
     /** if this increment should be written to the WAL or not */
-    6: optional bool writeToWal = 1
+    6: bool writeToWal = 1
+  ) throws (1: TIOError io)
+  
+  TResult increment(
+    /** the table to increment the value on */
+    1: required binary table,
+
+    /** the TIncrement to increment */
+    2: required TIncrement increment
   ) throws (1: TIOError io)
 
   /**
@@ -387,7 +406,7 @@ service THBaseService {
     1: required i32 scannerId,
 
     /** number of rows to return */
-    2: optional i32 numRows = 1
+    2: i32 numRows = 1
   ) throws (
     1: TIOError io,
 

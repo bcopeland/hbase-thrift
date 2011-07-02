@@ -21,7 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * TODO: optional bool "empty"?
+ * if no Result is found, row and columnValues will not be set.
  */
 public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields>, java.io.Serializable, Cloneable {
   private static final org.apache.thrift.protocol.TStruct STRUCT_DESC = new org.apache.thrift.protocol.TStruct("TResult");
@@ -98,7 +98,7 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
   public static final Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> metaDataMap;
   static {
     Map<_Fields, org.apache.thrift.meta_data.FieldMetaData> tmpMap = new EnumMap<_Fields, org.apache.thrift.meta_data.FieldMetaData>(_Fields.class);
-    tmpMap.put(_Fields.ROW, new org.apache.thrift.meta_data.FieldMetaData("row", org.apache.thrift.TFieldRequirementType.REQUIRED, 
+    tmpMap.put(_Fields.ROW, new org.apache.thrift.meta_data.FieldMetaData("row", org.apache.thrift.TFieldRequirementType.OPTIONAL, 
         new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING        , true)));
     tmpMap.put(_Fields.COLUMN_VALUES, new org.apache.thrift.meta_data.FieldMetaData("columnValues", org.apache.thrift.TFieldRequirementType.REQUIRED, 
         new org.apache.thrift.meta_data.ListMetaData(org.apache.thrift.protocol.TType.LIST, 
@@ -111,11 +111,9 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
   }
 
   public TResult(
-    ByteBuffer row,
     List<TColumnValue> columnValues)
   {
     this();
-    this.row = row;
     this.columnValues = columnValues;
   }
 
@@ -392,9 +390,11 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
 
     oprot.writeStructBegin(STRUCT_DESC);
     if (this.row != null) {
-      oprot.writeFieldBegin(ROW_FIELD_DESC);
-      oprot.writeBinary(this.row);
-      oprot.writeFieldEnd();
+      if (isSetRow()) {
+        oprot.writeFieldBegin(ROW_FIELD_DESC);
+        oprot.writeBinary(this.row);
+        oprot.writeFieldEnd();
+      }
     }
     if (this.columnValues != null) {
       oprot.writeFieldBegin(COLUMN_VALUES_FIELD_DESC);
@@ -417,13 +417,15 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
     StringBuilder sb = new StringBuilder("TResult(");
     boolean first = true;
 
-    sb.append("row:");
-    if (this.row == null) {
-      sb.append("null");
-    } else {
-      org.apache.thrift.TBaseHelper.toString(this.row, sb);
+    if (isSetRow()) {
+      sb.append("row:");
+      if (this.row == null) {
+        sb.append("null");
+      } else {
+        org.apache.thrift.TBaseHelper.toString(this.row, sb);
+      }
+      first = false;
     }
-    first = false;
     if (!first) sb.append(", ");
     sb.append("columnValues:");
     if (this.columnValues == null) {
@@ -438,9 +440,6 @@ public class TResult implements org.apache.thrift.TBase<TResult, TResult._Fields
 
   public void validate() throws org.apache.thrift.TException {
     // check for required fields
-    if (row == null) {
-      throw new org.apache.thrift.protocol.TProtocolException("Required field 'row' was not present! Struct: " + toString());
-    }
     if (columnValues == null) {
       throw new org.apache.thrift.protocol.TProtocolException("Required field 'columnValues' was not present! Struct: " + toString());
     }

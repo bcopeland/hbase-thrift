@@ -100,24 +100,22 @@ public class ThriftUtilities {
    */
   public static TResult resultFromHBase(Result in) {
     KeyValue[] raw = in.raw();
+    TResult out = new TResult();
     byte[] row = in.getRow();
     if (row != null) {
-      List<TColumnValue> columnValues = new ArrayList<TColumnValue>();
-      for (KeyValue kv : raw) {
-        TColumnValue col = new TColumnValue();
-        col.setFamily(kv.getFamily());
-        col.setQualifier(kv.getQualifier());
-        col.setTimestamp(kv.getTimestamp());
-        col.setValue(kv.getValue());
-        columnValues.add(col);
-      }
-      TResult out = new TResult();
-      out.setRow(row);
-      out.setColumnValues(columnValues);
-      return out;
-    } else {
-      return null;
+      out.setRow(in.getRow());
     }
+    List<TColumnValue> columnValues = new ArrayList<TColumnValue>();
+    for (KeyValue kv : raw) {
+      TColumnValue col = new TColumnValue();
+      col.setFamily(kv.getFamily());
+      col.setQualifier(kv.getQualifier());
+      col.setTimestamp(kv.getTimestamp());
+      col.setValue(kv.getValue());
+      columnValues.add(col);
+    }
+    out.setColumnValues(columnValues);
+    return out;
   }
 
   /**
@@ -241,21 +239,35 @@ public class ThriftUtilities {
     return out;
   }
 
-  // TODO: Not yet entirely sure what the best way to do this is
   public static TDelete deleteFromHBase(Delete in) {
     TDelete out = new TDelete(ByteBuffer.wrap(in.getRow()));
 
     List<TColumn> columns = new ArrayList<TColumn>();
+    long rowTimestamp = in.getTimeStamp();
+    if (rowTimestamp != HConstants.LATEST_TIMESTAMP) {
+      out.setTimestamp(rowTimestamp);
+    }
 
     // Map<family, List<KeyValue>>
-    for (Map.Entry<byte[], List<KeyValue>> listEntry : in.getFamilyMap().entrySet()) {
-      TColumn column = new TColumn(ByteBuffer.wrap(listEntry.getKey()));
-      for (KeyValue keyValue : listEntry.getValue()) {
-        if (keyValue.isDeleteFamily() && keyValue.getTimestamp() != HConstants.LATEST_TIMESTAMP) {
+    for (Map.Entry<byte[], List<KeyValue>> familyEntry : in.getFamilyMap().entrySet()) {
+      TColumn column = new TColumn(ByteBuffer.wrap(familyEntry.getKey()));
+      for (KeyValue keyValue : familyEntry.getValue()) {
+        byte[] family = keyValue.getFamily();
+        byte[] qualifier = keyValue.getQualifier();
+        long timestamp = keyValue.getTimestamp();
+        if (family != null) {
+          column.setFamily(family);
+        }
+        if (qualifier != null) {
+          column.setQualifier(qualifier);
+        }
+        if (timestamp != HConstants.LATEST_TIMESTAMP) {
           column.setTimestamp(keyValue.getTimestamp());
         }
       }
+      columns.add(column);
     }
+    out.setColumns(columns);
 
     return out;
   }
@@ -272,7 +284,7 @@ public class ThriftUtilities {
     return out;
   }
 
-  public static Scan scanFromThrift(TScan in) {
+  public static Scan scanFromThrift(TScan in) throws IOException {
     Scan out = new Scan();
 
     if (in.isSetStartRow())
@@ -281,8 +293,10 @@ public class ThriftUtilities {
       out.setStopRow(in.getStopRow());
     if (in.isSetCaching())
       out.setCaching(in.getCaching());
+    if (in.isSetMaxVersions()) {
+      out.setMaxVersions(in.getMaxVersions());
+    }
 
-    // TODO: Timestamps
     if (in.isSetColumns()) {
       for (TColumn column : in.getColumns()) {
         if (column.isSetQualifier()) {
@@ -293,7 +307,20 @@ public class ThriftUtilities {
       }
     }
 
+    TTimeRange timeRange = in.getTimeRange();
+    if (timeRange.isSetMinStamp() && timeRange.isSetMaxStamp()) {
+      out.setTimeRange(timeRange.getMinStamp(), timeRange.getMaxStamp());
+    }
+
     return out;
   }
 
+  public static Increment incrementFromThrift(TIncrement in) throws IOException {
+    Increment out = new Increment(in.getRow());
+    for (TColumnIncrement column : in.getColumns()) {
+      out.addColumn(column.getFamily(), column.getQualifier(), column.getAmount());
+    }
+    out.setWriteToWAL(in.isWriteToWal());
+    return out;
+  }
 }
