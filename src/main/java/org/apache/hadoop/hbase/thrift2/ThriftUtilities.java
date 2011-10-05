@@ -308,7 +308,8 @@ public class ThriftUtilities {
     }
 
     TTimeRange timeRange = in.getTimeRange();
-    if (timeRange.isSetMinStamp() && timeRange.isSetMaxStamp()) {
+    if (timeRange != null &&
+        timeRange.isSetMinStamp() && timeRange.isSetMaxStamp()) {
       out.setTimeRange(timeRange.getMinStamp(), timeRange.getMaxStamp());
     }
 
