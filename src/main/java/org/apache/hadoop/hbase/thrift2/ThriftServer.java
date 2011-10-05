@@ -58,7 +58,7 @@ public class ThriftServer {
 
   private static final String DEFAULT_LISTEN_PORT = "9090";
 
-  private ThriftServer() {
+  public ThriftServer() {
   }
 
   private static void printUsage() {
