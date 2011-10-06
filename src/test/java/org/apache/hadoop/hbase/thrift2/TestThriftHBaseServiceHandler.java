@@ -44,6 +44,7 @@ import org.apache.hadoop.hbase.thrift2.generated.TIOError;
 import org.apache.hadoop.hbase.thrift2.generated.TIncrement;
 import org.apache.hadoop.hbase.thrift2.generated.TPut;
 import org.apache.hadoop.hbase.thrift2.generated.TResult;
+import org.apache.hadoop.hbase.thrift2.generated.TScan;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.thrift.TException;
 import org.jruby.compiler.ir.operands.Array;
@@ -286,8 +287,7 @@ public class TestThriftHBaseServiceHandler {
 
   /**
    * check that checkAndDelete fails if the cell does not exist, then put in the cell, then check that the
-   * checkAndDelete
-   * succeeds.
+   * checkAndDelete succeeds.
    * 
    * @throws Exception
    */
@@ -330,6 +330,42 @@ public class TestThriftHBaseServiceHandler {
     result = handler.get(table, get);
     assertFalse(result.isSetRow());
     assertEquals(0, result.getColumnValuesSize());
+  }
+
+  @Test
+  public void testScan() throws Exception {
+    ThriftHBaseServiceHandler handler = new ThriftHBaseServiceHandler();
+    ByteBuffer table = ByteBuffer.wrap(tableAname);
+
+    TScan scan = new TScan();
+    List<TColumn> columns = new ArrayList<TColumn>();
+    TColumn column = new TColumn();
+    column.setFamily(familyAname);
+    column.setQualifier(qualifierAname);
+    columns.add(column);
+    scan.setColumns(columns);
+    scan.setStartRow("testScan".getBytes());
+
+    TColumnValue columnValue = new TColumnValue(ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname), ByteBuffer.wrap(valueAname));
+    List<TColumnValue> columnValues = new ArrayList<TColumnValue>();
+    columnValues.add(columnValue);
+    for (int i = 0; i < 10; i++) {
+      TPut put = new TPut(ByteBuffer.wrap(("testScan" + i).getBytes()), columnValues);
+      handler.put(table, put);
+    }
+
+    int scanId = handler.openScanner(table, scan);
+    List<TResult> results = handler.getScannerRows(scanId, 10);
+    assertEquals(10, results.size());
+    for (int i = 0; i < 10; i++) {
+      assertArrayEquals(("testScan" + i).getBytes(), results.get(i).getRow());
+    }
+
+    results = handler.getScannerRows(scanId, 10);
+    assertEquals(0, results.size());
+
+    handler.closeScanner(scanId);
+    // TODO: test scanner was closed
   }
 
   /**
