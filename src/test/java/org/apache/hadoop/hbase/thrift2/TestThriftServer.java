@@ -46,7 +46,9 @@ import org.apache.hadoop.hbase.thrift2.generated.TResult;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.jruby.compiler.ir.operands.Array;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.google.common.base.Equivalence;
@@ -110,8 +112,8 @@ public class TestThriftServer {
    *           }
    */
 
-  @Before
-  public void setup() throws Exception {
+  @BeforeClass
+  public static void beforeClass() throws Exception {
     UTIL.startMiniCluster();
     HBaseAdmin admin = new HBaseAdmin(new Configuration());
     HTableDescriptor tableDescriptor = new HTableDescriptor(tableAname);
@@ -121,9 +123,14 @@ public class TestThriftServer {
     admin.createTable(tableDescriptor);
   }
 
-  @After
-  public void shutdown() throws IOException {
+  @AfterClass
+  public static void afterClass() throws IOException {
     UTIL.shutdownMiniCluster();
+  }
+
+  @Before
+  public void setup() throws Exception {
+
   }
 
   /**
@@ -246,8 +253,51 @@ public class TestThriftServer {
     TColumnValue columnValue = result.getColumnValues().get(0);
     assertArrayEquals(Bytes.toBytes(2L), columnValue.getValue());
   }
-  
-  
+
+  /**
+   * check that checkAndPut fails if the cell does not exist, then put in the cell, then check that the checkAndPut
+   * succeeds.
+   * 
+   * @throws Exception
+   */
+  @Test
+  public void testCheckAndPut() throws Exception {
+    ThriftHBaseServiceHandler handler = new ThriftHBaseServiceHandler();
+    byte[] rowName = "testCheckAndPut".getBytes();
+    ByteBuffer table = ByteBuffer.wrap(tableAname);
+
+    List<TColumnValue> columnValuesA = new ArrayList<TColumnValue>();
+    TColumnValue columnValueA = new TColumnValue(ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname), ByteBuffer.wrap(valueAname));
+    columnValuesA.add(columnValueA);
+    TPut putA = new TPut(ByteBuffer.wrap(rowName), columnValuesA);
+    putA.setColumnValues(columnValuesA);
+
+    List<TColumnValue> columnValuesB = new ArrayList<TColumnValue>();
+    TColumnValue columnValueB = new TColumnValue(ByteBuffer.wrap(familyBname), ByteBuffer.wrap(qualifierBname), ByteBuffer.wrap(valueBname));
+    columnValuesB.add(columnValueB);
+    TPut putB = new TPut(ByteBuffer.wrap(rowName), columnValuesB);
+    putB.setColumnValues(columnValuesB);
+
+    assertFalse(handler.checkAndPut(table, ByteBuffer.wrap(rowName), ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname),
+        ByteBuffer.wrap(valueAname), putB));
+
+    TGet get = new TGet(ByteBuffer.wrap(rowName));
+    TResult result = handler.get(table, get);
+    assertEquals(0, result.getColumnValuesSize());
+
+    handler.put(table, putA);
+
+    assertTrue(handler.checkAndPut(table, ByteBuffer.wrap(rowName), ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname),
+        ByteBuffer.wrap(valueAname), putB));
+    
+    result = handler.get(table, get);
+    assertArrayEquals(rowName, result.getRow());
+    List<TColumnValue> returnedColumnValues = result.getColumnValues();
+    List<TColumnValue> expectedColumnValues = new ArrayList<TColumnValue>();
+    expectedColumnValues.add(columnValueA);
+    expectedColumnValues.add(columnValueB);
+    assertTColumnValuesEqual(expectedColumnValues, returnedColumnValues);
+  }
   /**
    * // Apply a few Mutations to rowA
    * // mutations.add(new Mutation(false, columnAname, valueAname));
