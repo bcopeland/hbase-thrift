@@ -80,9 +80,9 @@ public class TestThriftServer {
     ThriftHBaseServiceHandler handler = new ThriftHBaseServiceHandler();
 
     // Create/enable/disable/delete tables, ensure methods act correctly
-    assertTrue(handler.isMasterRunning());
 
     /*
+    assertTrue(handler.isMasterRunning());
     assertEquals(handler.getTableNames().size(), 0);
     handler.createTable(tableAname, getColumnDescriptors());
     assertEquals(handler.getTableNames().size(), 1);

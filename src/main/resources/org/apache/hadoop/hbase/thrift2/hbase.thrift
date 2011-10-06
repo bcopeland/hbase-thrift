@@ -278,7 +278,7 @@ service THBaseService {
     /** the expected value, if not provided the
         check is for the non-existence of the
         column in question */
-    5: required binary value,
+    5: binary value,
 
     /** the TPut to put if the check succeeds */
     6: required TPut put
