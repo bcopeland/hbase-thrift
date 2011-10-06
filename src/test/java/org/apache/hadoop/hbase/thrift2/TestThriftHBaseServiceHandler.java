@@ -283,6 +283,55 @@ public class TestThriftHBaseServiceHandler {
     expectedColumnValues.add(columnValueB);
     assertTColumnValuesEqual(expectedColumnValues, returnedColumnValues);
   }
+
+  /**
+   * check that checkAndDelete fails if the cell does not exist, then put in the cell, then check that the
+   * checkAndDelete
+   * succeeds.
+   * 
+   * @throws Exception
+   */
+  @Test
+  public void testCheckAndDelete() throws Exception {
+    ThriftHBaseServiceHandler handler = new ThriftHBaseServiceHandler();
+    byte[] rowName = "testCheckAndDelete".getBytes();
+    ByteBuffer table = ByteBuffer.wrap(tableAname);
+
+    List<TColumnValue> columnValuesA = new ArrayList<TColumnValue>();
+    TColumnValue columnValueA = new TColumnValue(ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname), ByteBuffer.wrap(valueAname));
+    columnValuesA.add(columnValueA);
+    TPut putA = new TPut(ByteBuffer.wrap(rowName), columnValuesA);
+    putA.setColumnValues(columnValuesA);
+
+    List<TColumnValue> columnValuesB = new ArrayList<TColumnValue>();
+    TColumnValue columnValueB = new TColumnValue(ByteBuffer.wrap(familyBname), ByteBuffer.wrap(qualifierBname), ByteBuffer.wrap(valueBname));
+    columnValuesB.add(columnValueB);
+    TPut putB = new TPut(ByteBuffer.wrap(rowName), columnValuesB);
+    putB.setColumnValues(columnValuesB);
+
+    // put putB so that we know whether the row has been deleted or not
+    handler.put(table, putB);
+
+    TDelete delete = new TDelete(ByteBuffer.wrap(rowName));
+
+    assertFalse(handler.checkAndDelete(table, ByteBuffer.wrap(rowName), ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname),
+        ByteBuffer.wrap(valueAname), delete));
+
+    TGet get = new TGet(ByteBuffer.wrap(rowName));
+    TResult result = handler.get(table, get);
+    assertArrayEquals(rowName, result.getRow());
+    assertTColumnValuesEqual(columnValuesB, result.getColumnValues());
+
+    handler.put(table, putA);
+
+    assertTrue(handler.checkAndDelete(table, ByteBuffer.wrap(rowName), ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname),
+        ByteBuffer.wrap(valueAname), delete));
+
+    result = handler.get(table, get);
+    assertFalse(result.isSetRow());
+    assertEquals(0, result.getColumnValuesSize());
+  }
+
   /**
    * // Apply a few Mutations to rowA
    * // mutations.add(new Mutation(false, columnAname, valueAname));
