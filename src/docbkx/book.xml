@@ -28,9 +28,15 @@
       xmlns:html="http://www.w3.org/1999/xhtml"
       xmlns:db="http://docbook.org/ns/docbook">
   <info>
-    <title>The Apache <link xlink:href="http://www.hbase.org">HBase</link>
-    Book</title>
-      <copyright><year>2010</year><holder>Apache Software Foundation</holder></copyright>
+    <title><link xlink:href="http://www.hbase.org">
+           <inlinemediaobject>
+               <imageobject>
+                   <imagedata align="middle" valign="middle" fileref="hbase_logo.png" />
+               </imageobject>
+           </inlinemediaobject>
+       </link>
+    </title>
+      <copyright><year>2011</year><holder>Apache Software Foundation</holder></copyright>
       <abstract>
     <para>This is the official book of
     <link xlink:href="http://www.hbase.org">Apache HBase</link>,
@@ -64,8 +70,8 @@
   <!--XInclude some chapters-->
   <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="preface.xml" />
   <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="getting_started.xml" />
-  <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="upgrading.xml" />
   <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="configuration.xml" />
+  <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="upgrading.xml" />
   <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="shell.xml" />
 
 
@@ -75,38 +81,198 @@
   <para>See <link xlink:href="http://hbase.org/apidocs/org/apache/hadoop/hbase/mapreduce/package-summary.html#package_description">HBase and MapReduce</link> up in javadocs.
   Start there.  Below is some additional help.</para>
   <section xml:id="splitter">
-  <title>The default HBase MapReduce Splitter</title>
-  <para>When <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/TableInputFormat.html">TableInputFormat</link>,
-  is used to source an HBase table in a MapReduce job,
-  its splitter will make a map task for each region of the table.
-  Thus, if there are 100 regions in the table, there will be
-  100 map-tasks for the job - regardless of how many column families are selected in the Scan.</para>
+    <title>Map-Task Spitting</title>
+    <section xml:id="splitter.default">
+    <title>The Default HBase MapReduce Splitter</title>
+    <para>When <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/TableInputFormat.html">TableInputFormat</link>
+    is used to source an HBase table in a MapReduce job,
+    its splitter will make a map task for each region of the table.
+    Thus, if there are 100 regions in the table, there will be
+    100 map-tasks for the job - regardless of how many column families are selected in the Scan.</para>
+    </section>
+    <section xml:id="splitter.custom">
+    <title>Custom Splitters</title>
+    <para>For those interested in implementing custom splitters, see the method <code>getSplits</code> in 
+    <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/TableInputFormatBase.html">TableInputFormatBase</link>.
+    That is where the logic for map-task assignment resides.  
+    </para>
+    </section>
   </section>
   <section xml:id="mapreduce.example">
-  <title>HBase Input MapReduce Example</title>
-  <para>To use HBase as a MapReduce source,
-  the job would be configured via <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/TableMapReduceUtil.html">TableMapReduceUtil</link> in the following manner...
-	<programlisting>Job job = ...;	
+    <title>HBase MapReduce Examples</title>
+    <section xml:id="mapreduce.example.read">
+    <title>HBase MapReduce Read Example</title>
+    <para>The following is an example of using HBase as a MapReduce source in read-only manner.  Specifically,
+    there is a Mapper instance but no Reducer, and nothing is being emitted from the Mapper.  There job would be defined
+    as follows...
+	<programlisting>
+Configuration config = HBaseConfiguration.create();
+Job job = new Job(config, "ExampleRead");
+job.setJarByClass(MyReadJob.class);     // class that contains mapper
+	
 Scan scan = new Scan();
-scan.setCaching(500);  // 1 is the default in Scan, which will be bad for MapReduce jobs
-scan.setCacheBlocks(false);  
-// Now set other scan attrs
+scan.setCaching(500);        // 1 is the default in Scan, which will be bad for MapReduce jobs
+scan.setCacheBlocks(false);  // don't set to true for MR jobs
+// set other scan attrs
 ...
   
 TableMapReduceUtil.initTableMapperJob(
-  tableName,   		// input HBase table name
-  scan, 			// Scan instance to control CF and attribute selection
-  MyMapper.class,		// mapper
-  Text.class,		// reducer key 
-  LongWritable.class,	// reducer value
-  job			// job instance
-  );</programlisting>
+  tableName,        // input HBase table name
+  scan,             // Scan instance to control CF and attribute selection
+  MyMapper.class,   // mapper
+  null,             // mapper output key 
+  null,             // mapper output value
+  job);
+job.setOutputFormatClass(NullOutputFormat.class);   // because we aren't emitting anything from mapper
+	    
+boolean b = job.waitForCompletion(true);
+if (!b) {
+  throw new IOException("error with job!");
+}
+  </programlisting>
   ...and the mapper instance would extend <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/TableMapper.html">TableMapper</link>...
-	<programlisting>public class MyMapper extends TableMapper&lt;Text, LongWritable&gt; {
-public void map(ImmutableBytesWritable row, Result value, Context context) 
-throws InterruptedException, IOException {
-// process data for the row from the Result instance.</programlisting>
-  	</para>
+	<programlisting>
+public static class MyMapper extends TableMapper&lt;Text, Text&gt; {
+
+  public void map(ImmutableBytesWritable row, Result value, Context context) throws InterruptedException, IOException {
+    // process data for the row from the Result instance.
+   }
+}    
+    </programlisting>
+  	  </para>
+  	 </section>
+    <section xml:id="mapreduce.example.readwrite">
+    <title>HBase MapReduce Read/Write Example</title>
+    <para>The following is an example of using HBase both as a source and as a sink with MapReduce. 
+    This example will simply copy data from one table to another.
+    <programlisting>
+Configuration config = HBaseConfiguration.create();
+Job job = new Job(config,"ExampleReadWrite");
+job.setJarByClass(MyReadWriteJob.class);    // class that contains mapper
+	        	        
+Scan scan = new Scan();
+scan.setCaching(500);        // 1 is the default in Scan, which will be bad for MapReduce jobs
+scan.setCacheBlocks(false);  // don't set to true for MR jobs
+// set other scan attrs
+	        
+TableMapReduceUtil.initTableMapperJob(
+	sourceTable,      // input table
+	scan,	          // Scan instance to control CF and attribute selection
+	MyMapper.class,   // mapper class
+	null,	          // mapper output key
+	null,	          // mapper output value
+	job);
+TableMapReduceUtil.initTableReducerJob(
+	targetTable,      // output table
+	null,             // reducer class
+	job);
+job.setNumReduceTasks(0);
+	        
+boolean b = job.waitForCompletion(true);
+if (!b) {
+    throw new IOException("error with job!");
+}
+    </programlisting>
+	An explanation is required of what <classname>TableMapReduceUtil</classname> is doing, especially with the reducer.  
+	<link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/TableOutputFormat.html">TableOutputFormat</link> is being used
+	as the outputFormat class, and several parameters are being set on the config (e.g., TableOutputFormat.OUTPUT_TABLE), as
+	well as setting the reducer output key to <classname>ImmutableBytesWritable</classname> and reducer value to <classname>Writable</classname>.
+	These could be set by the programmer on the job and conf, but <classname>TableMapReduceUtil</classname> tries to make things easier.    
+	<para>The following is the example mapper, which will create a <classname>Put</classname> and matching the input <classname>Result</classname>
+	and emit it.  Note:  this is what the CopyTable utility does.
+	</para>
+    <programlisting>
+public static class MyMapper extends TableMapper&lt;ImmutableBytesWritable, Put&gt;  {
+
+	public void map(ImmutableBytesWritable row, Result value, Context context) throws IOException, InterruptedException {
+		// this example is just copying the data from the source table...
+   		context.write(row, resultToPut(row,value));
+   	}
+        
+  	private static Put resultToPut(ImmutableBytesWritable key, Result result) throws IOException {
+  		Put put = new Put(key.get());
+ 		for (KeyValue kv : result.raw()) {
+			put.add(kv);
+		}
+		return put;
+   	}
+}
+    </programlisting>
+    <para>There isn't actually a reducer step, so <classname>TableOutputFormat</classname> takes care of sending the <classname>Put</classname>
+    to the target table. 
+    </para>
+    <para>This is just an example, developers could choose not to use <classname>TableOutputFormat</classname> and connect to the 
+    target table themselves.
+    </para>
+    </para>
+    </section>
+    <section xml:id="mapreduce.example.summary">
+    <title>HBase MapReduce Summary Example</title>
+    <para>The following example uses HBase as a MapReduce source and sink with a summarization step.  This example will 
+    count the number of distinct instances of a value in a table and write those summarized counts in another table.
+    <programlisting>
+Configuration config = HBaseConfiguration.create();
+Job job = new Job(config,"ExampleSummary");
+job.setJarByClass(MySummaryJob.class);     // class that contains mapper and reducer
+	        
+Scan scan = new Scan();
+scan.setCaching(500);        // 1 is the default in Scan, which will be bad for MapReduce jobs
+scan.setCacheBlocks(false);  // don't set to true for MR jobs
+// set other scan attrs
+	        
+TableMapReduceUtil.initTableMapperJob(
+	sourceTable,        // input table
+	scan,               // Scan instance to control CF and attribute selection
+	MyMapper.class,     // mapper class
+	Text.class,         // mapper output key
+	IntWritable.class,  // mapper output value
+	job);
+TableMapReduceUtil.initTableReducerJob(
+	targetTable,        // output table
+	MyReducer.class,    // reducer class
+	job);
+job.setNumReduceTasks(1);   // at least one, adjust as required
+	    
+boolean b = job.waitForCompletion(true);
+if (!b) {
+	throw new IOException("error with job!");
+}    
+    </programlisting>
+    In this example mapper a column with a String-value is chosen as the value to summarize upon.  
+    This value is used as the key to emit from the mapper, and an <classname>IntWritable</classname> represents an instance counter.
+    <programlisting>
+public static class MyMapper extends TableMapper&lt;Text, IntWritable&gt;  {
+
+	private final IntWritable ONE = new IntWritable(1);
+   	private Text text = new Text();
+    	
+   	public void map(ImmutableBytesWritable row, Result value, Context context) throws IOException, InterruptedException {
+        	String val = new String(value.getValue(Bytes.toBytes("cf"), Bytes.toBytes("attr1")));
+          	text.set(val);     // we can only emit Writables...
+
+        	context.write(text, ONE);
+   	}
+}
+    </programlisting>
+    In the reducer, the "ones" are counted (just like any other MR example that does this), and then emits a <classname>Put</classname>.
+    <programlisting>
+public static class MyReducer extends TableReducer&lt;Text, IntWritable, ImmutableBytesWritable&gt;  {
+        
+ 	public void reduce(Text key, Iterable&lt;IntWritable&gt; values, Context context) throws IOException, InterruptedException {
+    		int i = 0;
+    		for (IntWritable val : values) {
+    			i += val.get();
+    		}
+    		Put put = new Put(Bytes.toBytes(key.toString()));
+    		put.add(Bytes.toBytes("cf"), Bytes.toBytes("count"), Bytes.toBytes(i));
+
+    		context.write(null, put);
+   	}
+}
+    </programlisting>
+    
+    </para>
+    </section>
    </section>
    <section xml:id="mapreduce.htable.access">
    <title>Accessing Other HBase Tables in a MapReduce Job</title>
@@ -117,10 +283,16 @@ throws InterruptedException, IOException {
 	<programlisting>public class MyMapper extends TableMapper&lt;Text, LongWritable&gt; {
   private HTable myOtherTable;
 
-  @Override
   public void setup(Context context) {
     myOtherTable = new HTable("myOtherTable");
-  }</programlisting>
+  }
+  
+  public void map(ImmutableBytesWritable row, Result value, Context context) throws IOException, InterruptedException {
+	// process Result...
+	// use 'myOtherTable' for lookups
+  }
+  
+  </programlisting>
    </para>
     </section>
   <section xml:id="mapreduce.specex">
@@ -149,13 +321,31 @@ throws InterruptedException, IOException {
   <para>HBase schemas can be created or updated with <xref linkend="shell" />
       or by using <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/HBaseAdmin.html">HBaseAdmin</link> in the Java API.
       </para>
+      <para>Tables must be disabled when making ColumnFamily modifications, for example..
+      <programlisting>
+Configuration config = HBaseConfiguration.create();  
+HBaseAdmin admin = new HBaseAdmin(conf);    
+String table = "myTable";
+
+admin.disableTable(table);           
+
+HColumnDescriptor cf1 = ...;
+admin.addColumn(table, cf1  );      // adding new ColumnFamily
+HColumnDescriptor cf2 = ...;
+admin.modifyColumn(table, cf2 );    // modifying existing ColumnFamily
+
+admin.enableTable(table);                
+      </programlisting>
+      </para>See <xref linkend="client_dependencies"/> for more information about configuring client connections.
+      <para>
+      </para>
   </section>   
   <section xml:id="number.of.cfs">
   <title>
       On the number of column families
   </title>
   <para>
-      HBase currently does not do well with anything about two or three column families so keep the number
+      HBase currently does not do well with anything above two or three column families so keep the number
       of column families in your schema low.  Currently, flushing and compactions are done on a per Region basis so
       if one column family is carrying the bulk of the data bringing on flushes, the adjacent families
       will also be flushed though the amount of data they carry is small.  Compaction is currently triggered
@@ -163,34 +353,35 @@ throws InterruptedException, IOException {
       flushing and compaction interaction can make for a bunch of needless i/o loading (To be addressed by
       changing flushing and compaction to work on a per column family basis).
     </para>
-    <para>Try to make do with one column famliy if you can in your schemas.  Only introduce a
+    <para>Try to make do with one column family if you can in your schemas.  Only introduce a
         second and third column family in the case where data access is usually column scoped;
         i.e. you query one column family or the other but usually not both at the one time.
     </para>
   </section>
-  <section xml:id="timeseries">
-  <title>
-  Monotonically Increasing Row Keys/Timeseries Data
-  </title>
-  <para>
-      In the HBase chapter of Tom White's book <link xlink:url="http://oreilly.com/catalog/9780596521981">Hadoop: The Definitive Guide</link> (O'Reilly) there is a an optimization note on watching out for a phenomenon where an import process walks in lock-step with all clients in concert pounding one of the table's regions (and thus, a single node), then moving onto the next region, etc.  With monotonically increasing row-keys (i.e., using a timestamp), this will happen.  See this comic by IKai Lan on why monotically increasing row keys are problematic in BigTable-like datastores:
+  <section xml:id="rowkey.design"><title>Rowkey Design</title>
+    <section xml:id="timeseries">
+    <title>
+    Monotonically Increasing Row Keys/Timeseries Data
+    </title>
+    <para>
+      In the HBase chapter of Tom White's book <link xlink:url="http://oreilly.com/catalog/9780596521981">Hadoop: The Definitive Guide</link> (O'Reilly) there is a an optimization note on watching out for a phenomenon where an import process walks in lock-step with all clients in concert pounding one of the table's regions (and thus, a single node), then moving onto the next region, etc.  With monotonically increasing row-keys (i.e., using a timestamp), this will happen.  See this comic by IKai Lan on why monotonically increasing row keys are problematic in BigTable-like datastores:
       <link xlink:href="http://ikaisays.com/2011/01/25/app-engine-datastore-tip-monotonically-increasing-values-are-bad/">monotonically increasing values are bad</link>.  The pile-up on a single region brought on
-      by monoticially increasing keys can be mitigated by randomizing the input records to not be in sorted order, but in general its best to avoid using a timestamp or a sequence (e.g. 1, 2, 3) as the row-key. 
-  </para>
+      by monotonically increasing keys can be mitigated by randomizing the input records to not be in sorted order, but in general its best to avoid using a timestamp or a sequence (e.g. 1, 2, 3) as the row-key. 
+    </para>
 
 
-  <para>If you do need to upload time series data into HBase, you should
-  study <link xlink:href="http://opentsdb.net/">OpenTSDB</link> as a
-  successful example.  It has a page describing the <link xlink:href=" http://opentsdb.net/schema.html">schema</link> it uses in
-  HBase.  The key format in OpenTSDB is effectively [metric_type][event_timestamp], which would appear at first glance to contradict the previous advice about not using a timestamp as the key.  However, the difference is that the timestamp is not in the <emphasis>lead</emphasis> position of the key, and the design assumption is that there are dozens or hundreds (or more) of different metric types.  Thus, even with a continual stream of input data with a mix of metric types, the Puts are distributed across various points of regions in the table.
- </para>
+    <para>If you do need to upload time series data into HBase, you should
+    study <link xlink:href="http://opentsdb.net/">OpenTSDB</link> as a
+    successful example.  It has a page describing the <link xlink:href=" http://opentsdb.net/schema.html">schema</link> it uses in
+    HBase.  The key format in OpenTSDB is effectively [metric_type][event_timestamp], which would appear at first glance to contradict the previous advice about not using a timestamp as the key.  However, the difference is that the timestamp is not in the <emphasis>lead</emphasis> position of the key, and the design assumption is that there are dozens or hundreds (or more) of different metric types.  Thus, even with a continual stream of input data with a mix of metric types, the Puts are distributed across various points of regions in the table.
+   </para>
   </section>
   <section xml:id="keysize">
       <title>Try to minimize row and column sizes</title>
-      <subtitle>Or why are my storefile indices large?</subtitle>
+      <subtitle>Or why are my StoreFile indices large?</subtitle>
       <para>In HBase, values are always freighted with their coordinates; as a
           cell value passes through the system, it'll be accompanied by its
-          row, column name, and timestamp.  Always.  If your rows and column names
+          row, column name, and timestamp - always.  If your rows and column names
           are large, especially compared to the size of the cell value, then
           you may run up against some interesting scenarios.  One such is
           the case described by Marc Limotte at the tail of
@@ -206,29 +397,82 @@ throws InterruptedException, IOException {
                   Compression will also make for larger indices.  See
                   the thread <link xlink:href="http://search-hadoop.com/m/hemBv1LiN4Q1/a+question+storefileIndexSize&amp;subj=a+question+storefileIndexSize">a question storefileIndexSize</link>
                   up on the user mailing list.
-      `</para>
-  </section>
-  <section xml:id="schema.versions">
+       </para>
+       <para>Most of the time small inefficiencies don't matter all that much.  Unfortunately,
+         this is a case where they do.  Whatever patterns are selected for ColumnFamilies, attributes, and rowkeys they could be repeated
+       several billion times in your data</para>
+       <section xml:id="keysize.cf"><title>Column Families</title>
+         <para>Try to keep the ColumnFamily names as small as possible, preferably one character (e.g. "d" for data/default).
+         </para> 
+       </section>
+       <section xml:id="keysize.atttributes"><title>Attributes</title>
+         <para>Although verbose attribute names (e.g., "myVeryImportantAttribute") are easier to read, prefer shorter attribute names (e.g., "via")
+         to store in HBase.
+         </para> 
+       </section>
+       <section xml:id="keysize.row"><title>Rowkey Length</title>
+         <para>Keep them as short as is reasonable such that they can still be useful for required data access (e.g., Get vs. Scan). 
+         A short key that is useless for data access is not better than a longer key with better get/scan properties.  Expect tradeoffs
+         when designing rowkeys.
+         </para> 
+       </section>
+    </section>
+    <section xml:id="reverse.timestamp"><title>Reverse Timestamps</title>
+    <para>A common problem in database processing is quickly finding the most recent version of a value.  A technique using reverse timestamps
+    as a part of the key can help greatly with a special case of this problem.  Also found in the HBase chapter of Tom White's book Hadoop:  The Definitive Guide (O'Reilly), 
+    the technique involves appending (<code>Long.MAX_VALUE - timestamp</code>) to the end of any key, e.g., [key][reverse_timestamp].
+    </para>
+    <para>The most recent value for [key] in a table can be found by performing a Scan for [key] and obtaining the first record.  Since HBase keys
+    are in sorted order, this key sorts before any older row-keys for [key] and thus is first.
+    </para>
+    <para>This technique would be used instead of using <xref linkend="schema.versions">HBase Versioning</xref> where the intent is to hold onto all versions
+    "forever" (or a very long time) and at the same time quickly obtain access to any other version by using the same Scan technique.
+    </para>
+    </section>
+    <section xml:id="rowkey.scope">
+    <title>Rowkeys and ColumnFamilies</title>
+    <para>Rowkeys are scoped to ColumnFamilies.  Thus, the same rowkey could exist in each ColumnFamily that exists in a table without collision.
+    </para>
+    </section>
+    <section xml:id="changing.rowkeys"><title>Immutability of Rowkeys</title>
+    <para>Rowkeys cannot be changed.  The only way they can be "changed" in a table is if the row is deleted and then re-inserted.
+    This is a fairly common question on the HBase dist-list so it pays to get the rowkeys right the first time (and/or before you've 
+    inserted a lot of data).
+    </para>
+    </section>
+    </section>  <!--  rowkey design -->  
+    <section xml:id="schema.versions">
   <title>
   Number of Versions
   </title>
-  <para>The number of row versions to store is configured per column
+     <section xml:id="schema.versions.max"><title>Maximum Number of Versions</title>
+      <para>The maximum number of row versions to store is configured per column
       family via <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HColumnDescriptor.html">HColumnDescriptor</link>.
-      The default is 3.
+      The default for max versions is 3.
       This is an important parameter because as described in <xref linkend="datamodel" />
       section HBase does <emphasis>not</emphasis> overwrite row values, but rather
       stores different values per row by time (and qualifier).  Excess versions are removed during major
-      compactions.  The number of versions may need to be increased or decreased depending on application needs.
-  </para>
-  </section>
-  <section xml:id="changing.rowkeys">
-  <title>
-  Immutability of Rowkeys
-  </title>
-  <para>Rowkeys cannot be changed.  The only way they can be "changed" in a table is if the row is deleted and then re-inserted.
-  This is a fairly common question on the HBase dist-list so it pays to get the rowkeys right the first time (and/or before you've 
-  inserted a lot of data).
-  </para>
+      compactions.  The number of max versions may need to be increased or decreased depending on application needs.
+      </para>
+      <para>It is not recommended setting the number of max versions to an exceedingly high level (e.g., hundreds or more) unless those old values are 
+      very dear to you because this will greatly increase StoreFile size. 
+      </para>
+     </section>
+    <section xml:id="schema.minversions">
+    <title>
+    Minimum Number of Versions
+    </title>
+    <para>Like number of max row versions, the minimum number of row versions to keep is configured per column
+      family via <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HColumnDescriptor.html">HColumnDescriptor</link>.
+      The default for min versions is 0, which means the feature is disabled.
+      The minimum number of row versions parameter is used together with the time-to-live parameter and can be combined with the
+      number of row versions parameter to allow configurations such as
+      "keep the last T minutes worth of data, at most N versions, <emphasis>but keep at least M versions around</emphasis>"
+      (where M is the value for minimum number of row versions, M&lt;=N).
+      This parameter should only be set when time-to-live is enabled for a column family and must be less or equal to the 
+      number of row versions.
+    </para>
+    </section>
   </section>
   <section xml:id="supported.datatypes">
   <title>
@@ -242,6 +486,112 @@ throws InterruptedException, IOException {
   search the mailling list for conversations on this topic. All rows in HBase conform to the <xref linkend="datamodel">datamodel</xref>, and 
   that includes versioning.  Take that into consideration when making your design, as well as block size for the ColumnFamily.  
   </para>
+    <section xml:id="counters">
+      <title>Counters</title>
+      <para>
+      One supported datatype that deserves special mention are "counters" (i.e., the ability to do atomic increments of numbers).  See 
+      <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/HTable.html#increment%28org.apache.hadoop.hbase.client.Increment%29">Increment</link> in HTable.
+      </para>
+      <para>Synchronization on counters are done on the RegionServer, not in the client.
+      </para>
+    </section> 
+  </section>
+  <section xml:id="cf.in.memory">
+  <title>
+  In-Memory ColumnFamilies
+  </title>
+  <para>ColumnFamilies can optionally be defined as in-memory.  Data is still persisted to disk, just like any other ColumnFamily.  
+  In-memory blocks have the highest priority in the <xref linkend="block.cache" />, but it is not a guarantee that the entire table
+  will be in memory.
+  </para>
+  <para>See <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HColumnDescriptor.html">HColumnDescriptor</link> for more information.
+  </para>
+  </section>
+  <section xml:id="ttl">
+  <title>Time To Live (TTL)</title>
+  <para>ColumnFamilies can set a TTL length in seconds, and HBase will automatically delete rows once the expiration time is reached.
+  This applies to <emphasis>all</emphasis> versions of a row - even the current one.  The TTL time encoded in the HBase for the row is specified in UTC.
+  </para>
+  <para>See <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HColumnDescriptor.html">HColumnDescriptor</link> for more information.
+  </para>
+  </section>
+  <section xml:id="schema.bloom">
+  <title>Bloom Filters</title>
+  <para>Bloom Filters can be enabled per-ColumnFamily.
+        Use <code>HColumnDescriptor.setBloomFilterType(NONE | ROW |
+        ROWCOL)</code> to enable blooms per Column Family. Default =
+        <varname>NONE</varname> for no bloom filters. If
+        <varname>ROW</varname>, the hash of the row will be added to the bloom
+        on each insert. If <varname>ROWCOL</varname>, the hash of the row +
+        column family + column family qualifier will be added to the bloom on
+        each key insert.</para>
+  <para>See <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HColumnDescriptor.html">HColumnDescriptor</link> and 
+  <xref linkend="blooms"/> for more information.
+  </para>
+  </section>
+  <section xml:id="secondary.indexes">
+  <title>
+  Secondary Indexes and Alternate Query Paths
+  </title>
+  <para>This section could also be titled "what if my table rowkey looks like <emphasis>this</emphasis> but I also want to query my table like <emphasis>that</emphasis>."
+  A common example on the dist-list is where a row-key is of the format "user-timestamp" but there are are reporting requirements on activity across users for certain 
+  time ranges.  Thus, selecting by user is easy because it is in the lead position of the key, but time is not.
+  </para>
+  <para>There is no single answer on the best way to handle this because it depends on...
+   <itemizedlist>
+       <listitem>Number of users</listitem>  
+       <listitem>Data size and data arrival rate</listitem>
+       <listitem>Flexibility of reporting requirements (e.g., completely ad-hoc date selection vs. pre-configured ranges) </listitem>  
+       <listitem>Desired execution speed of query (e.g., 90 seconds may be reasonable to some for an ad-hoc report, whereas it may be too long for others) </listitem>  
+   </itemizedlist>
+   ... and solutions are also influenced by the size of the cluster and how much processing power you have to throw at the solution.  
+   Common techniques are in sub-sections below.  This is a comprehensive, but not exhaustive, list of approaches.   
+  </para>
+  <para>It should not be a surprise that secondary indexes require additional cluster space and processing.  
+  This is precisely what happens in an RDBMS because the act of creating an alternate index requires both space and processing cycles to update.  RBDMS products
+  are more advanced in this regard to handle alternative index management out of the box.  However, HBase scales better at larger data volumes, so this is a feature trade-off. 
+  </para>
+  <para>Pay attention to <xref linkend="performance"/> when implementing any of these approaches.</para>
+  <para>Additionally, see the David Butler response in this dist-list thread <link xlink:href="http://search-hadoop.com/m/nvbiBp2TDP/Stargate%252Bhbase&amp;subj=Stargate+hbase">HBase, mail # user - Stargate+hbase</link>
+   </para>
+    <section xml:id="secondary.indexes.filter">
+      <title>
+       Filter Query
+      </title>
+      <para>Depending on the case, it may be appropriate to use <xref linkend="client.filter"/>.  In this case, no secondary index is created.
+      However, don't try a full-scan on a large table like this from an application (i.e., single-threaded client).
+      </para>
+    </section>
+    <section xml:id="secondary.indexes.periodic">
+      <title>
+       Periodic-Update Secondary Index
+      </title>
+      <para>A secondary index could be created in an other table which is periodically updated via a MapReduce job.  The job could be executed intra-day, but depending on 
+      load-strategy it could still potentially be out of sync with the main data table.</para>
+      <para>See <xref linkend="mapreduce.example.readwrite"/> for more information.</para>
+    </section>
+    <section xml:id="secondary.indexes.dualwrite">
+      <title>
+       Dual-Write Secondary Index
+      </title>
+      <para>Another strategy is to build the secondary index while publishing data to the cluster (e.g., write to data table, write to index table). 
+      If this is approach is taken after a data table already exists, then bootstrapping will be needed for the secondary index with a MapReduce job (see <xref linkend="secondary.indexes.periodic"/>).</para>
+    </section>
+    <section xml:id="secondary.indexes.summary">
+      <title>
+       Summary Tables
+      </title>
+      <para>Where time-ranges are very wide (e.g., year-long report) and where the data is voluminous, summary tables are a common approach.
+      These would be generated with MapReduce jobs into another table.</para>
+      <para>See <xref linkend="mapreduce.example.summary"/> for more information.</para>
+    </section>
+    <section xml:id="secondary.indexes.coproc">
+      <title>
+       Coprocessor Secondary Index
+      </title>
+      <para>Coprocessors act like RDBMS triggers.  These are currently on TRUNK.
+      </para>
+    </section>
   </section>
 
   </chapter>
@@ -266,7 +616,7 @@ throws InterruptedException, IOException {
           <para>Block cache hit ratio (0 to 100).  TODO:  describe impact to ratio where read requests that have cacheBlocks=false</para>
 		  </section>
           <section xml:id="hbase.regionserver.blockCacheSize"><title><varname>hbase.regionserver.blockCacheSize</varname></title>
-          <para>Block cache size in memory (bytes)</para>
+          <para>Block cache size in memory (bytes).  i.e., memory in use by the BlockCache</para>
 		  </section>
           <section xml:id="hbase.regionserver.compactionQueueSize"><title><varname>hbase.regionserver.compactionQueueSize</varname></title>
           <para>Size of the compaction queue.  This is the number of stores in the region that have been targeted for compaction.</para>
@@ -472,6 +822,61 @@ throws InterruptedException, IOException {
       specifies a <literal>cell</literal> in HBase. 
       Cell content is uninterrpreted bytes</para>
     </section>
+    <section xml:id="data_model_operations">
+       <title>Data Model Operations</title>
+       <para>The four primary data model operations are Get, Put, Scan, and Delete.  Operations are applied via 
+       <link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/HTable.html">HTable</link> instances.
+       </para>
+      <section xml:id="get">
+        <title>Get</title>
+        <para><link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/Get.html">Get</link> returns
+        attributes for a specified row.  Gets are executed via 
+        <link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/HTable.html#get%28org.apache.hadoop.hbase.client.Get%29">
+        HTable.get</link>.
+        </para>
+      </section>
+      <section xml:id="put">
+        <title>Put</title>
+        <para><link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/Put.html">Put</link> either 
+        adds new rows to a table (if the key is new) or can update existing rows (if the key already exists).  Puts are executed via
+        <link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/HTable.html#put%28org.apache.hadoop.hbase.client.Put%29">
+        HTable.put</link> (writeBuffer) or <link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/HTable.html#batch%28java.util.List%29">
+        HTable.batch</link> (non-writeBuffer).  
+        </para>
+      </section>
+      <section xml:id="scan">
+          <title>Scans</title>
+          <para><link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/Scan.html">Scan</link> allow
+          iteration over multiple rows for specified attributes.
+          </para>
+          <para>The following is an example of a 
+           on an HTable table instance.  Assume that a table is populated with rows with keys "row1", "row2", "row3", 
+           and then another set of rows with the keys "abc1", "abc2", and "abc3".  The following example shows how startRow and stopRow 
+           can be applied to a Scan instance to return the rows beginning with "row".        
+<programlisting>
+HTable htable = ...      // instantiate HTable
+    
+Scan scan = new Scan();
+scan.addColumn(Bytes.toBytes("cf"),Bytes.toBytes("attr"));
+scan.setStartRow( Bytes.toBytes("row"));
+scan.setStopRow( Bytes.toBytes("row" +  new byte[] {0}));  // note: stop key != start key
+for(Result result : htable.getScanner(scan)) {
+  // process Result instance
+}
+</programlisting>
+         </para>        
+        </section>
+      <section xml:id="delete">
+        <title>Delete</title>
+        <para><link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/Delete.html">Delete</link> removes
+        a row from a table.  Deletes are executed via 
+        <link xlink:href="http://hbase.apache.org/docs/current/api/org/apache/hadoop/hbase/client/HTable.html#delete%28org.apache.hadoop.hbase.client.Delete%29">
+        HTable.delete</link>.
+        </para>
+      </section>
+            
+    </section>
+
 
     <section xml:id="versions">
       <title>Versions<indexterm><primary>Versions</primary></indexterm></title>
@@ -565,25 +970,26 @@ throws InterruptedException, IOException {
         <section xml:id="default_get_example">
         <title>Default Get Example</title>
         <para>The following Get will only retrieve the current version of the row
-        <programlisting>
-        Get get = new Get(Bytes.toBytes("row1"));
-        Result r = htable.get(get);
-        byte[] b = r.getValue(Bytes.toBytes("cf"), Bytes.toBytes("attr"));  // returns current version of value          </programlisting>
+<programlisting>
+Get get = new Get(Bytes.toBytes("row1"));
+Result r = htable.get(get);
+byte[] b = r.getValue(Bytes.toBytes("cf"), Bytes.toBytes("attr"));  // returns current version of value          
+</programlisting>
         </para>
         </section>
         <section xml:id="versioned_get_example">
         <title>Versioned Get Example</title>
         <para>The following Get will return the last 3 versions of the row.
-        <programlisting>
-        Get get = new Get(Bytes.toBytes("row1"));
-        get.setMaxVersions(3);  // will return last 3 versions of row
-        Result r = htable.get(get);
-        byte[] b = r.getValue(Bytes.toBytes("cf"), Bytes.toBytes("attr"));  // returns current version of value
-        List&lt;KeyValue&gt; kv = r.getColumn(Bytes.toBytes("cf"), Bytes.toBytes("attr"));  // returns all versions of this column       
-        </programlisting>
+<programlisting>
+Get get = new Get(Bytes.toBytes("row1"));
+get.setMaxVersions(3);  // will return last 3 versions of row
+Result r = htable.get(get);
+byte[] b = r.getValue(Bytes.toBytes("cf"), Bytes.toBytes("attr"));  // returns current version of value
+List&lt;KeyValue&gt; kv = r.getColumn(Bytes.toBytes("cf"), Bytes.toBytes("attr"));  // returns all versions of this column       
+</programlisting>
         </para>
         </section>
-
+     
         <section>
           <title>Put</title>
 
@@ -600,24 +1006,25 @@ throws InterruptedException, IOException {
           <section xml:id="implicit_version_example">
           <title>Implicit Version Example</title>
           <para>The following Put will be implicitly versioned by HBase with the current time.
-          <programlisting>
-          Put put = new Put(Bytes.toBytes(row));
-          put.add(Bytes.toBytes("cf"), Bytes.toBytes("attr1"), Bytes.toBytes( data));
-          htable.put(put);
-          </programlisting>
+<programlisting>
+Put put = new Put(Bytes.toBytes(row));
+put.add(Bytes.toBytes("cf"), Bytes.toBytes("attr1"), Bytes.toBytes( data));
+htable.put(put);
+</programlisting>
           </para>
           </section>
           <section xml:id="explicit_version_example">
           <title>Explicit Version Example</title>
           <para>The following Put has the version timestamp explicitly set.
-          <programlisting>
-          Put put = new Put( Bytes.toBytes(row ));
-          long explicitTimeInMs = 555;  // just an example
-          put.add(Bytes.toBytes("cf"), Bytes.toBytes("attr1"), explicitTimeInMs, Bytes.toBytes(data));
-          htable.put(put);
-          </programlisting>
+<programlisting>
+Put put = new Put( Bytes.toBytes(row));
+long explicitTimeInMs = 555;  // just an example
+put.add(Bytes.toBytes("cf"), Bytes.toBytes("attr1"), explicitTimeInMs, Bytes.toBytes(data));
+htable.put(put);
+</programlisting>
           </para>
           </section>
+          
         </section>
 
         <section>
@@ -712,13 +1119,71 @@ throws InterruptedException, IOException {
   <chapter xml:id="architecture">
     <title>Architecture</title>
 
+	<section xml:id="arch.catalog">
+	 <title>Catalog Tables</title>
+	  <para>
+     </para>
+	  <section xml:id="arch.catalog.root">
+	   <title>ROOT</title>
+	   <para>-ROOT- keeps track of where the .META. table is.  The -ROOT- table structure is as follows: 
+       </para>
+       <para>Key:   
+            <itemizedlist>
+              <listitem>.META. region key (<code>.META.,,1</code>)</listitem>
+            </itemizedlist>
+       </para>
+       <para>Values:   
+            <itemizedlist>
+              <listitem><code>info:regioninfo</code> (serialized <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HRegionInfo.html">HRegionInfo</link>
+               instance of .META.)</listitem>
+              <listitem><code>info:server</code> (server:port of the RegionServer holding .META.)</listitem>
+              <listitem><code>info:serverstartcode</code> (start-time of the RegionServer process holding .META.)</listitem>
+            </itemizedlist>
+       </para>
+	   </section>
+	  <section xml:id="arch.catalog.meta">
+	   <title>META</title>
+	   <para>The .META. table keeps a list of all regions in the system. The .META. table structure is as follows: 
+       </para>
+       <para>Key:   
+            <itemizedlist>
+              <listitem>Region key of the format (<code>[table],[region start key],[region id]</code>)</listitem>
+            </itemizedlist>
+       </para>
+       <para>Values:   
+            <itemizedlist>
+              <listitem><code>info:regioninfo</code> (serialized <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HRegionInfo.html">
+              HRegionInfo</link> instance for this region)
+              </listitem>
+              <listitem><code>info:server</code> (server:port of the RegionServer containing this region)</listitem>
+              <listitem><code>info:serverstartcode</code> (start-time of the RegionServer process containing this region)</listitem>
+            </itemizedlist>
+       </para>
+       <para>When a table is in the process of splitting two other columns will be created, <code>info:splitA</code> and <code>info:splitB</code> 
+       which represent the two daughter regions.  The values for these columns are also serialized HRegionInfo instances.
+       After the region has been split eventually this row will be deleted.
+       </para>
+       <para>Notes on HRegionInfo:  the empty key is used to denote table start and table end.  A region with an empty start key
+       is the first region in a table.  If region has both an empty start and an empty end key, its the only region in the table
+       </para>
+       <para>In the (hopefully unlikely) event that programmatic processing of catalog metadata is required, see the
+         <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/util/Writables.html#getHRegionInfo%28byte[]%29">Writables</link> utility.
+       </para>
+	   </section>
+	   <section xml:id="arch.catalog.startup">
+	    <title>Startup Sequencing</title>
+	    <para>The META location is set in ROOT first.  Then META is updated with server and startcode values.
+	    </para>
+	    </section>	   
+     </section>  <!--  catalog -->
+     
 	<section xml:id="client">
 	 <title>Client</title>
      <para>The HBase client
          <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/HTable.html">HTable</link>
          is responsible for finding RegionServers that are serving the
          particular row range of interest.  It does this by querying
-         the <code>.META.</code> and <code>-ROOT</code> catalog tables
+         the <code>.META.</code> and <code>-ROOT-</code> catalog tables
          (TODO: Explain).  After locating the required
          region(s), the client <emphasis>directly</emphasis> contacts
          the RegionServer serving that region (i.e., it does not go
@@ -741,7 +1206,7 @@ which is usually what you want.  For example, this is preferred:
 		<programlisting>HBaseConfiguration conf = HBaseConfiguration.create();
 HTable table1 = new HTable(conf, "myTable");
 HTable table2 = new HTable(conf, "myTable");</programlisting>
-		a s opposed to this:
+		as opposed to this:
         <programlisting>HBaseConfiguration conf1 = HBaseConfiguration.create();
 HTable table1 = new HTable(conf1, "myTable");
 HBaseConfiguration conf2 = HBaseConfiguration.create();
@@ -749,6 +1214,11 @@ HTable table2 = new HTable(conf2, "myTable");</programlisting>
         For more information about how connections are handled in the HBase client,
         see <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/HConnectionManager.html">HConnectionManager</link>.
           </para>
+          <section xml:id="client.connection.pooling"><title>Connection Pooling</title>
+            <para>For applications which require high-end multithreaded access (e.g., web-servers or application servers that may serve many application threads
+            in a single JVM), see <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/HTablePool.html">HTablePool</link>.
+            </para>
+          </section>
    	  </section>
 	   <section xml:id="client.writebuffer"><title>WriteBuffer and Batch Methods</title>
            <para>If <xref linkend="perf.hbase.client.autoflush" /> is turned off on
@@ -768,16 +1238,141 @@ HTable table2 = new HTable(conf2, "myTable");</programlisting>
            see the <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/HTable.html#batch%28java.util.List%29">batch</link> methods on HTable.
 	   </para>
 	   </section>
-	   <section xml:id="client.filter"><title>Filters</title>
-           <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/Get.html">Get</link> and <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/Scan.html">Scan</link> instances can be
-           optionally configured with <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/Filter.html">filters</link> which are applied on the RegionServer. 
-    	   </para>
+	   <section xml:id="client.external"><title>External Clients</title>
+           <para>Information on non-Java clients and custom protocols is covered in <xref linkend="external_apis" />
+           </para>
 		</section>
 	</section>
-    
-    <section xml:id="daemons">
-     <title>Daemons</title>
-     <section xml:id="master"><title>Master</title>
+	
+    <section xml:id="client.filter"><title>Client Filters</title>
+      <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/Get.html">Get</link> and <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/Scan.html">Scan</link> instances can be
+       optionally configured with <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/Filter.html">filters</link> which are applied on the RegionServer. 
+      </para>
+      <para>Filters can be confusing because there are many different types, and it is best to approach them by understanding the groups
+      of Filter functionality.
+      </para>
+      <section xml:id="client.filter.structural"><title>Structural</title>
+        <para>Structural Filters contain other Filters.</para>
+        <section xml:id="client.filter.structural.fl"><title>FilterList</title>
+          <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/FilterList.html">FilterList</link>
+          represents a list of Filters with a relationship of <code>FilterList.Operator.MUST_PASS_ALL</code> or 
+          <code>FilterList.Operator.MUST_PASS_ONE</code> between the Filters.  The following example shows an 'or' between two 
+          Filters (checking for either 'my value' or 'my other value' on the same attribute).
+<programlisting>
+FilterList list = new FilterList(FilterList.Operator.MUST_PASS_ONE);
+SingleColumnValueFilter filter1 = new SingleColumnValueFilter(
+	cf,
+	column,
+	CompareOp.EQUAL,
+	Bytes.toBytes("my value")
+	);
+list.add(filter1);
+SingleColumnValueFilter filter2 = new SingleColumnValueFilter(
+	cf,
+	column,
+	CompareOp.EQUAL,
+	Bytes.toBytes("my other value")
+	);
+list.add(filter2);
+scan.setFilter(list);
+</programlisting>
+          </para>
+        </section>
+      </section>
+      <section xml:id="client.filter.cv"><title>Column Value</title>
+        <section xml:id="client.filter.cv.scvf"><title>SingleColumnValueFilter</title>
+          <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/SingleColumnValueFilter.html">SingleColumnValueFilter</link>
+          can be used to test column values for equivalence (<code><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/CompareFilter.CompareOp.html">CompareOp.EQUAL</link>
+          </code>), inequality (<code>CompareOp.NOT_EQUAL</code>), or ranges
+          (e.g., <code>CompareOp.GREATER</code>).  The folowing is example of testing equivalence a column to a String value "my value"...
+<programlisting>
+SingleColumnValueFilter filter = new SingleColumnValueFilter(
+	cf,
+	column,
+	CompareOp.EQUAL,
+	Bytes.toBytes("my value")
+	);
+scan.setFilter(filter);
+</programlisting>
+          </para>
+        </section>
+      </section>
+      <section xml:id="client.filter.cvp"><title>Column Value Comparators</title>
+        <para>There are several Comparator classes in the Filter package that deserve special mention.
+        These Comparators are used in concert with other Filters, such as  <xref linkend="client.filter.cv.scvf" />.
+        </para>
+        <section xml:id="client.filter.cvp.rcs"><title>RegexStringComparator</title>
+          <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/RegexStringComparator.html">RegexStringComparator</link>
+          supports regular expressions for value comparisons. 
+<programlisting>
+RegexStringComparator comp = new RegexStringComparator("my.");   // any value that starts with 'my'
+SingleColumnValueFilter filter = new SingleColumnValueFilter(
+	cf,
+	column,
+	CompareOp.EQUAL,
+	comp
+	);
+scan.setFilter(filter);
+</programlisting>
+          See the Oracle JavaDoc for <link xlink:href="http://download.oracle.com/javase/6/docs/api/java/util/regex/Pattern.html">supported RegEx patterns in Java</link>. 
+          </para>
+        </section>
+        <section xml:id="client.filter.cvp.rcs"><title>SubstringComparator</title>
+          <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/SubstringComparator.html">SubstringComparator</link>
+          can be used to determine if a given substring exists in a value.  The comparison is case-insensitive.
+          </para>
+<programlisting>
+SubstringComparator comp = new SubstringComparator("y val");   // looking for 'my value'
+SingleColumnValueFilter filter = new SingleColumnValueFilter(
+	cf,
+	column,
+	CompareOp.EQUAL,
+	comp
+	);
+scan.setFilter(filter);
+</programlisting>
+        </section>
+        <section xml:id="client.filter.cvp.bfp"><title>BinaryPrefixComparator</title>
+          <para>See <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/BinaryPrefixComparator.html">BinaryPrefixComparator</link>.</para>
+        </section>
+        <section xml:id="client.filter.cvp.bc"><title>BinaryComparator</title>
+          <para>See <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/BinaryComparator.html">BinaryComparator</link>.</para>
+        </section>
+      </section>
+      <section xml:id="client.filter.kvm"><title>KeyValue Metadata</title>
+        <para>As HBase stores data internally as KeyValue pairs, KeyValue Metadata Filters evaluate the existence of keys (i.e., ColumnFamily:Column qualifiers)
+        for a row, as opposed to values the previous section.
+        </para>
+        <section xml:id="client.filter.kvm.ff"><title>FamilyFilter</title>
+          <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/FamilyFilter.html">FamilyFilter</link> can be used
+          to filter on the ColumnFamily.  It is generally a better idea to select ColumnFamilies in the Scan than to do it with a Filter.</para>
+        </section>
+        <section xml:id="client.filter.kvm.qf"><title>QualifierFilter</title>
+          <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/QualifierFilter.html">QualifierFilter</link> can be used
+          to filter based on Column (aka Qualifier) name.
+          </para>
+        </section>
+        <section xml:id="client.filter.kvm.cpf"><title>ColumnPrefixFilter</title>
+          <para><link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/ColumnPrefixFilter.html">ColumnPrefixFilter</link> can be used
+          to filter based on the lead portion of Column (aka Qualifier) names.
+          </para>
+        </section>
+      </section>
+      <section xml:id="client.filter.row"><title>RowKey</title>
+        <section xml:id="client.filter.row.rf"><title>RowFilter</title>
+          <para>It is generally a better idea to use the startRow/stopRow methods on Scan for row selection, however 
+          <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/RowFilter.html">RowFilter</link> can also be used.</para>
+        </section>
+      </section>
+      <section xml:id="client.filter.utility"><title>Utility</title>
+        <section xml:id="client.filter.utility.fkof"><title>FirstKeyOnlyFilter</title>
+          <para>This is primarily used for rowcount jobs.  
+          See <link xlink:href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/filter/FirstKeyOnlyFilter.html">FirstKeyOnlyFilter</link>.</para>
+        </section>
+      </section>
+	</section>  <!--  client.filter -->
+ 
+    <section xml:id="master"><title>Master</title>
        <para><code>HMaster</code> is the implementation of the Master Server.  The Master server
        is responsible for monitoring all RegionServer instances in the cluster, and is
        the interface for all metadata changes.
@@ -803,13 +1398,15 @@ HTable table2 = new HTable(conf2, "myTable");</programlisting>
        </section>
        <section xml:id="master.processes"><title>Processes</title>
          <para>The Master runs several background threads:
-           <itemizedlist>
-             <listitem><code>LoadBalancer</code> periodically reassign regions in the cluster.
-             </listitem>
-             <listitem><code>CatalogJanitor</code> periodically checks and cleans up the .META. table. 
-             </listitem>
-           </itemizedlist>
          </para>
+         <section xml:id="master.processes.loadbalancer"><title>LoadBalancer</title>
+           <para>Periodically, and when there are not any regions in transition,
+             a load balancer will run and move regions around to balance cluster load.
+             See <xref linkend="balancer_config" /> for configuring this property.</para>
+         </section>
+         <section xml:id="master.processes.catalog"><title>CatalogJanitor</title>
+           <para>Periodically checks and cleans up the .META. table.  See <xref linkend="arch.catalog.meta" /> for more information on META.</para>
+         </section>
        </section>
 
      </section>
@@ -830,147 +1427,32 @@ HTable table2 = new HTable(conf2, "myTable");</programlisting>
        </section>
        <section xml:id="regionserver.arch.processes"><title>Processes</title>
          <para>The RegionServer runs a variety of background threads:</para>
-         <itemizedlist>
-            <listitem><code>CompactSplitThread</code> checks for splits and handle minor compactions.
-            </listitem>
-            <listitem><code>MajorCompactionChecker</code> checks for major compactions.
-            </listitem>
-            <listitem><code>MemStoreFlusher</code> periodically flushes in-memory writes in the MemStore to StoreFiles.
-            </listitem>
-            <listitem><code>LogRoller</code> periodically checks the RegionServer's HLog.
-            </listitem>
-         </itemizedlist>        
+         <section xml:id="regionserver.arch.processes.compactsplit"><title>CompactSplitThread</title>
+           <para>Checks for splits and handle minor compactions.</para>
+         </section>
+         <section xml:id="regionserver.arch.processes.majorcompact"><title>MajorCompactionChecker</title>
+           <para>Checks for major compactions.</para>
+         </section>
+         <section xml:id="regionserver.arch.processes.memstore"><title>MemStoreFlusher</title>
+           <para>Periodically flushes in-memory writes in the MemStore to StoreFiles.</para>
+         </section>
+         <section xml:id="regionserver.arch.processes.log"><title>LogRoller</title>
+           <para>Periodically checks the RegionServer's HLog.</para>
+         </section>
        </section>
 
+     <section xml:id="block.cache">
+       <title>Block Cache</title>
+       <para>The Block Cache contains three levels of block priority to allow for scan-resistance and in-memory ColumnFamilies.  A block is added with an in-memory
+       flag if the containing ColumnFamily is defined in-memory, otherwise a block becomes a single access priority.  Once a block is accessed again, it changes to multiple access. 
+       This is used to prevent scans from thrashing the cache, adding a least-frequently-used element to the eviction algorithm.  Blocks from in-memory ColumnFamilies
+       are the last to be evicted.
+       </para>
+       <para>
+        For more information, see the <link xlink:href="http://hbase.apache.org/xref/org/apache/hadoop/hbase/io/hfile/LruBlockCache.html">LruBlockCache source</link>
+        </para>
      </section>
-    </section>
 
-    <section xml:id="regions.arch">
-    <title>Regions</title>
-    <para>This chapter is all about Regions.</para>
-    <note>
-        <para>Regions are comprised of a Store per Column Family.
-        </para>
-    </note>
-
-    <section xml:id="arch.regions.size">
-      <title>Region Size</title>
-
-      <para>Region size is one of those tricky things, there are a few factors
-      to consider:</para>
-
-      <itemizedlist>
-        <listitem>
-          <para>Regions are the basic element of availability and
-          distribution.</para>
-        </listitem>
-
-        <listitem>
-          <para>HBase scales by having regions across many servers. Thus if
-          you have 2 regions for 16GB data, on a 20 node machine you are a net
-          loss there.</para>
-        </listitem>
-
-        <listitem>
-          <para>High region count has been known to make things slow, this is
-          getting better, but it is probably better to have 700 regions than
-          3000 for the same amount of data.</para>
-        </listitem>
-
-        <listitem>
-          <para>Low region count prevents parallel scalability as per point
-          #2. This really cant be stressed enough, since a common problem is
-          loading 200MB data into HBase then wondering why your awesome 10
-          node cluster is mostly idle.</para>
-        </listitem>
-
-        <listitem>
-          <para>There is not much memory footprint difference between 1 region
-          and 10 in terms of indexes, etc, held by the RegionServer.</para>
-        </listitem>
-      </itemizedlist>
-
-      <para>Its probably best to stick to the default, perhaps going smaller
-      for hot tables (or manually split hot regions to spread the load over
-      the cluster), or go with a 1GB region size if your cell sizes tend to be
-      largish (100k and up).</para>
-    </section>
-
-      <section>
-        <title>Region Splits</title>
-
-        <para>Splits run unaided on the RegionServer; i.e. the Master does not
-        participate. The RegionServer splits a region, offlines the split
-        region and then adds the daughter regions to META, opens daughters on
-        the parent's hosting RegionServer and then reports the split to the
-        Master. See <xref linkend="disable.splitting" /> for how to manually manage
-        splits (and for why you might do this)</para>
-      </section>
-
-      <section>
-        <title>Region Load Balancer</title>
-
-        <para>
-        Periodically, and when there are not any regions in transition,
-        a load balancer will run and move regions around to balance cluster load.
-        The period at which it runs can be configured.
-        </para>
-      </section>
-
-      <section xml:id="store">
-          <title>Store</title>
-          <para>A Store hosts a MemStore and 0 or more StoreFiles (HFiles). A Store corresponds to a column family for a table for a given region.
-          </para>
-    <section xml:id="store.memstore">
-      <title>MemStore</title>
-      <para>The MemStore holds in-memory modifications to the Store.  Modifications are KeyValues.
-       When asked to flush, current memstore is moved to snapshot and is cleared. 
-       HBase continues to serve edits out of new memstore and backing snapshot until flusher reports in that the 
-       flush succeeded. At this point the snapshot is let go.</para>
-      </section>
-    <section xml:id="hfile">
-      <title>StoreFile (HFile)</title>
-      <section><title>HFile Format</title>
-          <para>The <emphasis>hfile</emphasis> file format is based on
-              the SSTable file described in the <link xlink:href="http://labs.google.com/papers/bigtable.html">BigTable [2006]</link> paper and on
-              Hadoop's <link xlink:href="http://hadoop.apache.org/common/docs/current/api/org/apache/hadoop/io/file/tfile/TFile.html">tfile</link>
-              (The unit test suite and the compression harness were taken directly from tfile). 
-              Schubert Zhang's blog post on <link xlink:ref="http://cloudepr.blogspot.com/2009/09/hfile-block-indexed-file-format-to.html">HFile: A Block-Indexed File Format to Store Sorted Key-Value Pairs</link> makes for a thorough introduction to HBase's hfile.  Matteo Bertozzi has also put up a
-              helpful description, <link xlink:href="http://th30z.blogspot.com/2011/02/hbase-io-hfile.html?spref=tw">HBase I/O: HFile</link>.
-          </para>
-      </section>
-
-      <section xml:id="hfile_tool">
-        <title>HFile Tool</title>
-
-        <para>To view a textualized version of hfile content, you can do use
-        the <classname>org.apache.hadoop.hbase.io.hfile.HFile
-        </classname>tool. Type the following to see usage:<programlisting><code>$ ${HBASE_HOME}/bin/hbase org.apache.hadoop.hbase.io.hfile.HFile </code> </programlisting>For
-        example, to view the content of the file
-        <filename>hdfs://10.81.47.41:9000/hbase/TEST/1418428042/DSMP/4759508618286845475</filename>,
-        type the following:<programlisting> <code>$ ${HBASE_HOME}/bin/hbase org.apache.hadoop.hbase.io.hfile.HFile -v -f hdfs://10.81.47.41:9000/hbase/TEST/1418428042/DSMP/4759508618286845475 </code> </programlisting>If
-        you leave off the option -v to see just a summary on the hfile. See
-        usage for other things to do with the <classname>HFile</classname>
-        tool.</para>
-      </section>
-      </section>
-      <section xml:id="compaction">
-        <title>Compaction</title>
-        <para>There are two types of compactions:  minor and major.  Minor compactions will usually pick up a couple of the smaller adjacent
-         files and rewrite them as one.  Minors do not drop deletes or expired cells, only major compactions do this.  Sometimes a minor compaction
-         will pick up all  the files in the store and in this case it actually promotes itself to being a major compaction.  
-         For a description of how a minor compaction picks files to compact, see the <link xlink:href="http://hbase.apache.org/xref/org/apache/hadoop/hbase/regionserver/Store.html#836">ascii diagram in the Store source code.</link>
-         </para>
-         <para>After a major compaction runs there will be a single storefile per store, and this will help performance usually.  Caution:  major compactions rewrite all of the stores data and on a loaded system, this may not be tenable;
-             major compactions will usually have to be <xref linkend="disable.splitting" /> on large systems.
-        </para>
-      </section>
-
-
-      </section>
-
-
-  </section>
       <section xml:id="wal">
        <title >Write Ahead Log (WAL)</title>
 
@@ -1033,17 +1515,136 @@ HTable table2 = new HTable(conf2, "myTable");</programlisting>
             Figure how to deal with eof splitting logs</link></para>
           </footnote></para>
       </section>
+     </section>
+     </section>
+
+    </section>  <!--  regionserver -->
+
+    <section xml:id="regions.arch">
+    <title>Regions</title>
+    <para>This section is all about Regions.</para>
+    <note>
+        <para>Regions are comprised of a Store per Column Family.
+        </para>
+    </note>
+
+    <section xml:id="arch.regions.size">
+      <title>Region Size</title>
+
+      <para>Region size is one of those tricky things, there are a few factors
+      to consider:</para>
+
+      <itemizedlist>
+        <listitem>
+          <para>Regions are the basic element of availability and
+          distribution.</para>
+        </listitem>
+
+        <listitem>
+          <para>HBase scales by having regions across many servers. Thus if
+          you have 2 regions for 16GB data, on a 20 node machine you are a net
+          loss there.</para>
+        </listitem>
+
+        <listitem>
+          <para>High region count has been known to make things slow, this is
+          getting better, but it is probably better to have 700 regions than
+          3000 for the same amount of data.</para>
+        </listitem>
+
+        <listitem>
+          <para>Low region count prevents parallel scalability as per point
+          #2. This really cant be stressed enough, since a common problem is
+          loading 200MB data into HBase then wondering why your awesome 10
+          node cluster is mostly idle.</para>
+        </listitem>
+
+        <listitem>
+          <para>There is not much memory footprint difference between 1 region
+          and 10 in terms of indexes, etc, held by the RegionServer.</para>
+        </listitem>
+      </itemizedlist>
+
+      <para>Its probably best to stick to the default, perhaps going smaller
+      for hot tables (or manually split hot regions to spread the load over
+      the cluster), or go with a 1GB region size if your cell sizes tend to be
+      largish (100k and up).</para>
     </section>
 
-    </section>
-  </chapter>
-  
-  <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="performance.xml" />
+      <section>
+        <title>Region Splits</title>
 
-  <chapter xml:id="blooms">
-    <title>Bloom Filters</title>
+        <para>Splits run unaided on the RegionServer; i.e. the Master does not
+        participate. The RegionServer splits a region, offlines the split
+        region and then adds the daughter regions to META, opens daughters on
+        the parent's hosting RegionServer and then reports the split to the
+        Master. See <xref linkend="disable.splitting" /> for how to manually manage
+        splits (and for why you might do this)</para>
+      </section>
 
-    <para>Bloom filters were developed over in <link
+      <section xml:id="regions.arch.balancer">
+        <title>Region Load Balancing</title>
+
+        <para>
+        Regions can be periodically moved by the <xref linkend="master.processes.loadbalancer" />.
+        </para>
+       
+      </section>
+
+      <section xml:id="store">
+          <title>Store</title>
+          <para>A Store hosts a MemStore and 0 or more StoreFiles (HFiles). A Store corresponds to a column family for a table for a given region.
+          </para>
+    <section xml:id="store.memstore">
+      <title>MemStore</title>
+      <para>The MemStore holds in-memory modifications to the Store.  Modifications are KeyValues.
+       When asked to flush, current memstore is moved to snapshot and is cleared. 
+       HBase continues to serve edits out of new memstore and backing snapshot until flusher reports in that the 
+       flush succeeded. At this point the snapshot is let go.</para>
+      </section>
+    <section xml:id="hfile">
+      <title>StoreFile (HFile)</title>
+      <section><title>HFile Format</title>
+          <para>The <emphasis>hfile</emphasis> file format is based on
+              the SSTable file described in the <link xlink:href="http://labs.google.com/papers/bigtable.html">BigTable [2006]</link> paper and on
+              Hadoop's <link xlink:href="http://hadoop.apache.org/common/docs/current/api/org/apache/hadoop/io/file/tfile/TFile.html">tfile</link>
+              (The unit test suite and the compression harness were taken directly from tfile). 
+              Schubert Zhang's blog post on <link xlink:ref="http://cloudepr.blogspot.com/2009/09/hfile-block-indexed-file-format-to.html">HFile: A Block-Indexed File Format to Store Sorted Key-Value Pairs</link> makes for a thorough introduction to HBase's hfile.  Matteo Bertozzi has also put up a
+              helpful description, <link xlink:href="http://th30z.blogspot.com/2011/02/hbase-io-hfile.html?spref=tw">HBase I/O: HFile</link>.
+          </para>
+      </section>
+
+      <section xml:id="hfile_tool">
+        <title>HFile Tool</title>
+
+        <para>To view a textualized version of hfile content, you can do use
+        the <classname>org.apache.hadoop.hbase.io.hfile.HFile
+        </classname>tool. Type the following to see usage:<programlisting><code>$ ${HBASE_HOME}/bin/hbase org.apache.hadoop.hbase.io.hfile.HFile </code> </programlisting>For
+        example, to view the content of the file
+        <filename>hdfs://10.81.47.41:8020/hbase/TEST/1418428042/DSMP/4759508618286845475</filename>,
+        type the following:<programlisting> <code>$ ${HBASE_HOME}/bin/hbase org.apache.hadoop.hbase.io.hfile.HFile -v -f hdfs://10.81.47.41:8020/hbase/TEST/1418428042/DSMP/4759508618286845475 </code> </programlisting>If
+        you leave off the option -v to see just a summary on the hfile. See
+        usage for other things to do with the <classname>HFile</classname>
+        tool.</para>
+      </section>
+      </section>
+      <section xml:id="compaction">
+        <title>Compaction</title>
+        <para>There are two types of compactions:  minor and major.  Minor compactions will usually pick up a couple of the smaller adjacent
+         files and rewrite them as one.  Minors do not drop deletes or expired cells, only major compactions do this.  Sometimes a minor compaction
+         will pick up all  the files in the store and in this case it actually promotes itself to being a major compaction.  
+         For a description of how a minor compaction picks files to compact, see the <link xlink:href="http://hbase.apache.org/xref/org/apache/hadoop/hbase/regionserver/Store.html#836">ascii diagram in the Store source code.</link>
+         </para>
+         <para>After a major compaction runs there will be a single storefile per store, and this will help performance usually.  Caution:  major compactions rewrite all of the stores data and on a loaded system, this may not be tenable;
+             major compactions will usually have to be done manually on large systems.  See <xref linkend="managed.compactions" />.
+        </para>
+      </section>
+
+     </section>  <!--  store -->
+      
+     <section xml:id="blooms">
+     <title>Bloom Filters</title>
+         <para><link xlink:href="http://en.wikipedia.org/wiki/Bloom_filter">Bloom filters</link> were developed over in <link
     xlink:href="https://issues.apache.org/jira/browse/HBASE-1200">HBase-1200
     Add bloomfilters</link>.<footnote>
         <para>For description of the development process -- why static blooms
@@ -1065,56 +1666,10 @@ HTable table2 = new HTable(conf2, "myTable");</programlisting>
         rewrite from scratch though again it starts with the one-lab
         work.</para>
       </footnote></para>
-
-    <section xml:id="bloom.config">
-      <title>Configurations</title>
-
-      <para>Blooms are enabled by specifying options on a column family in the
-      HBase shell or in java code as specification on
-      <classname>org.apache.hadoop.hbase.HColumnDescriptor</classname>.</para>
-
-      <section>
-        <title><code>HColumnDescriptor</code> option</title>
-
-        <para>Use <code>HColumnDescriptor.setBloomFilterType(NONE | ROW |
-        ROWCOL)</code> to enable blooms per Column Family. Default =
-        <varname>NONE</varname> for no bloom filters. If
-        <varname>ROW</varname>, the hash of the row will be added to the bloom
-        on each insert. If <varname>ROWCOL</varname>, the hash of the row +
-        column family + column family qualifier will be added to the bloom on
-        each key insert.</para>
-      </section>
-
-      <section>
-        <title><varname>io.hfile.bloom.enabled</varname> global kill
-        switch</title>
-
-        <para><code>io.hfile.bloom.enabled</code> in
-        <classname>Configuration</classname> serves as the kill switch in case
-        something goes wrong. Default = <varname>true</varname>.</para>
-      </section>
-
-      <section>
-        <title><varname>io.hfile.bloom.error.rate</varname></title>
-
-        <para><varname>io.hfile.bloom.error.rate</varname> = average false
-        positive rate. Default = 1%. Decrease rate by ½ (e.g. to .5%) == +1
-        bit per bloom entry.</para>
-      </section>
-
-      <section>
-        <title><varname>io.hfile.bloom.max.fold</varname></title>
-
-        <para><varname>io.hfile.bloom.max.fold</varname> = guaranteed minimum
-        fold rate. Most people should leave this alone. Default = 7, or can
-        collapse to at least 1/128th of original size. See the
-        <emphasis>Development Process</emphasis> section of the document <link
-        xlink:href="https://issues.apache.org/jira/secure/attachment/12444007/Bloom_Filters_in_HBase.pdf">BloomFilters
-        in HBase</link> for more on what this option means.</para>
-      </section>
-    </section>
-
-    <section xml:id="bloom_footprint">
+        <para>See also <xref linkend="schema.bloom" /> and <xref linkend="config.bloom" />.
+        </para>
+     
+     <section xml:id="bloom_footprint">
       <title>Bloom StoreFile footprint</title>
 
       <para>Bloom filters add an entry to the <classname>StoreFile</classname>
@@ -1126,219 +1681,35 @@ HTable table2 = new HTable(conf2, "myTable");</programlisting>
         <title>BloomFilter in the <classname>StoreFile</classname>
         <classname>FileInfo</classname> data structure</title>
 
-        <section>
-          <title><varname>BLOOM_FILTER_TYPE</varname></title>
-
           <para><classname>FileInfo</classname> has a
           <varname>BLOOM_FILTER_TYPE</varname> entry which is set to
           <varname>NONE</varname>, <varname>ROW</varname> or
           <varname>ROWCOL.</varname></para>
-        </section>
       </section>
 
       <section>
         <title>BloomFilter entries in <classname>StoreFile</classname>
         metadata</title>
 
-        <section>
-          <title><varname>BLOOM_FILTER_META</varname></title>
-
           <para><varname>BLOOM_FILTER_META</varname> holds Bloom Size, Hash
           Function used, etc. Its small in size and is cached on
           <classname>StoreFile.Reader</classname> load</para>
-        </section>
-
-        <section>
-          <title><varname>BLOOM_FILTER_DATA</varname></title>
-
           <para><varname>BLOOM_FILTER_DATA</varname> is the actual bloomfilter
           data. Obtained on-demand. Stored in the LRU cache, if it is enabled
           (Its enabled by default).</para>
-        </section>
       </section>
+     </section>   
+     </section>   <!--  bloom  -->  
+     
     </section>
   </chapter>
-
+  
+  <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="performance.xml" />
   <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="troubleshooting.xml" />
   <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="build.xml" />
   <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="developer.xml" />
-
-  <appendix xml:id="tools">
-    <title >Tools</title>
-
-    <para>Here we list HBase tools for administration, analysis, fixup, and
-    debugging.</para>
-    <section xml:id="hbck">
-        <title>HBase <application>hbck</application></title>
-        <subtitle>An <emphasis>fsck</emphasis> for your HBase install</subtitle>
-        <para>To run <application>hbck</application> against your HBase cluster run
-        <programlisting>$ ./bin/hbase hbck</programlisting>
-        At the end of the commands output it prints <emphasis>OK</emphasis>
-        or <emphasis>INCONSISTENCY</emphasis>. If your cluster reports
-        inconsistencies, pass <command>-details</command> to see more detail emitted.
-        If inconsistencies, run <command>hbck</command> a few times because the
-        inconsistency may be transient (e.g. cluster is starting up or a region is
-        splitting).
-        Passing <command>-fix</command> may correct the inconsistency (This latter
-        is an experimental feature).
-        </para>
-    </section>
-    <section><title>HFile Tool</title>
-        <para>See <xref linkend="hfile_tool" />.</para>
-    </section>
-    <section xml:id="wal_tools">
-      <title>WAL Tools</title>
-
-      <section xml:id="hlog_tool">
-        <title><classname>HLog</classname> tool</title>
-
-        <para>The main method on <classname>HLog</classname> offers manual
-        split and dump facilities. Pass it WALs or the product of a split, the
-        content of the <filename>recovered.edits</filename>. directory.</para>
-
-        <para>You can get a textual dump of a WAL file content by doing the
-        following:<programlisting> <code>$ ./bin/hbase org.apache.hadoop.hbase.regionserver.wal.HLog --dump hdfs://example.org:9000/hbase/.logs/example.org,60020,1283516293161/10.10.21.10%3A60020.1283973724012</code> </programlisting>The
-        return code will be non-zero if issues with the file so you can test
-        wholesomeness of file by redirecting <varname>STDOUT</varname> to
-        <code>/dev/null</code> and testing the program return.</para>
-
-        <para>Similarily you can force a split of a log file directory by
-        doing:<programlisting> $ ./<code>bin/hbase org.apache.hadoop.hbase.regionserver.wal.HLog --split hdfs://example.org:9000/hbase/.logs/example.org,60020,1283516293161/</code></programlisting></para>
-      </section>
-    </section>
-    <section xml:id="compression.tool"><title>Compression Tool</title>
-        <para>See <xref linkend="compression.tool" />.</para>
-    </section>
-    <section xml:id="decommission"><title>Node Decommission</title>
-        <para>You can stop an individual RegionServer by running the following
-            script in the HBase directory on the particular  node:
-            <programlisting>$ ./bin/hbase-daemon.sh stop regionserver</programlisting>
-            The RegionServer will first close all regions and then shut itself down.
-            On shutdown, the RegionServer's ephemeral node in ZooKeeper will expire.
-            The master will notice the RegionServer gone and will treat it as
-            a 'crashed' server; it will reassign the nodes the RegionServer was carrying.
-            <note><title>Disable the Load Balancer before Decommissioning a node</title>
-             <para>If the load balancer runs while a node is shutting down, then
-                 there could be contention between the Load Balancer and the
-                 Master's recovery of the just decommissioned RegionServer.
-                 Avoid any problems by disabling the balancer first.
-                 See <xref linkend="lb" /> below.
-             </para>
-            </note>
-        </para>
-        <para>
-        A downside to the above stop of a RegionServer is that regions could be offline for
-        a good period of time.  Regions are closed in order.  If many regions on the server, the
-        first region to close may not be back online until all regions close and after the master
-        notices the RegionServer's znode gone.  In HBase 0.90.2, we added facility for having
-        a node gradually shed its load and then shutdown itself down.  HBase 0.90.2 added the
-            <filename>graceful_stop.sh</filename> script.  Here is its usage:
-            <programlisting>$ ./bin/graceful_stop.sh 
-Usage: graceful_stop.sh [--config &amp;conf-dir>] [--restart] [--reload] [--thrift] [--rest] &amp;hostname>
- thrift      If we should stop/start thrift before/after the hbase stop/start
- rest        If we should stop/start rest before/after the hbase stop/start
- restart     If we should restart after graceful stop
- reload      Move offloaded regions back on to the stopped server
- debug       Move offloaded regions back on to the stopped server
- hostname    Hostname of server we are to stop</programlisting>
-        </para>
-        <para>
-            To decommission a loaded RegionServer, run the following:
-            <programlisting>$ ./bin/graceful_stop.sh HOSTNAME</programlisting>
-            where <varname>HOSTNAME</varname> is the host carrying the RegionServer
-            you would decommission.  
-            <note><title>On <varname>HOSTNAME</varname></title>
-                <para>The <varname>HOSTNAME</varname> passed to <filename>graceful_stop.sh</filename>
-            must match the hostname that hbase is using to identify RegionServers.
-            Check the list of RegionServers in the master UI for how HBase is
-            referring to servers. Its usually hostname but can also be FQDN.
-            Whatever HBase is using, this is what you should pass the
-            <filename>graceful_stop.sh</filename> decommission
-            script.  If you pass IPs, the script is not yet smart enough to make
-            a hostname (or FQDN) of it and so it will fail when it checks if server is
-            currently running; the graceful unloading of regions will not run.
-            </para>
-        </note> The <filename>graceful_stop.sh</filename> script will move the regions off the
-            decommissioned RegionServer one at a time to minimize region churn.
-            It will verify the region deployed in the new location before it
-            will moves the next region and so on until the decommissioned server
-            is carrying zero regions.  At this point, the <filename>graceful_stop.sh</filename>
-            tells the RegionServer <command>stop</command>.  The master will at this point notice the
-            RegionServer gone but all regions will have already been redeployed
-            and because the RegionServer went down cleanly, there will be no
-            WAL logs to split.
-            <note xml:id="lb"><title>Load Balancer</title>
-            <para> 
-                It is assumed that the Region Load Balancer is disabled while the
-                <command>graceful_stop</command> script runs (otherwise the balancer
-                and the decommission script will end up fighting over region deployments).
-                Use the shell to disable the balancer:
-                <programlisting>hbase(main):001:0> balance_switch false
-true
-0 row(s) in 0.3590 seconds</programlisting>
-This turns the balancer OFF.  To reenable, do:
-                <programlisting>hbase(main):001:0> balance_switch true
-false
-0 row(s) in 0.3590 seconds</programlisting>
-            </para> 
-        </note>
-        </para>
-        <section xml:id="rolling">
-            <title>Rolling Restart</title>
-        <para>
-            You can also ask this script to restart a RegionServer after the shutdown
-            AND move its old regions back into place.  The latter you might do to
-            retain data locality.  A primitive rolling restart might be effected by
-            running something like the following:
-            <programlisting>$ for i in `cat conf/regionservers|sort`; do ./bin/graceful_stop.sh --restart --reload --debug $i; done &amp;> /tmp/log.txt &amp;
-            </programlisting>
-            Tail the output of <filename>/tmp/log.txt</filename> to follow the scripts
-            progress. The above does RegionServers only.  Be sure to disable the
-            load balancer before doing the above.  You'd need to do the master
-            update separately.  Do it before you run the above script.
-            Here is a pseudo-script for how you might craft a rolling restart script:
-            <orderedlist>
-                <listitem><para>Untar your release, make sure of its configuration and
-                        then rsync it across the cluster. If this is 0.90.2, patch it
-                        with HBASE-3744 and HBASE-3756.
-                    </para>
-                </listitem>
-                <listitem>
-                    <para>Run hbck to ensure the cluster consistent
-                        <programlisting>$ ./bin/hbase hbck</programlisting>
-                    Effect repairs if inconsistent.
-                    </para>
-                </listitem>
-                <listitem>
-                    <para>Restart the Master: <programlisting>$ ./bin/hbase-daemon.sh stop master; ./bin/hbase-daemon.sh start master</programlisting>
-                    </para>
-                </listitem>
-                <listitem>
-                    <para>
-                       Disable the region balancer:<programlisting>$ echo "balance_switch false" | ./bin/hbase</programlisting>
-                    </para>
-                </listitem>
-                <listitem>
-                     <para>Run the <filename>graceful_stop.sh</filename> script per RegionServer.  For example:
-            <programlisting>$ for i in `cat conf/regionservers|sort`; do ./bin/graceful_stop.sh --restart --reload --debug $i; done &amp;> /tmp/log.txt &amp;
-            </programlisting>
-                     If you are running thrift or rest servers on the RegionServer, pass --thrift or --rest options (See usage
-                     for <filename>graceful_stop.sh</filename> script).
-                 </para>
-                </listitem>
-                <listitem>
-                    <para>Restart the Master again.  This will clear out dead servers list and reenable the balancer.
-                    </para>
-                </listitem>
-                <listitem>
-                    <para>Run hbck to ensure the cluster is consistent.
-                    </para>
-                </listitem>
-            </orderedlist>
-        </para>
-    </section>
-    </section>
-  </appendix>
+  <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="external_apis.xml" />
+  <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="ops_mgt.xml" />
 
   <appendix xml:id="compression">
 
@@ -1384,9 +1755,19 @@ false
     <title>
     LZO
     </title>
-    <para>
-        See <xref linkend="lzo" /> above.
-    </para>
+      <para>Unfortunately, HBase cannot ship with LZO because of
+      the licensing issues; HBase is Apache-licensed, LZO is GPL.
+      Therefore LZO install is to be done post-HBase install.
+      See the <link xlink:href="http://wiki.apache.org/hadoop/UsingLzoCompression">Using LZO Compression</link>
+      wiki page for how to make LZO work with HBase.
+      </para>
+      <para>A common problem users run into when using LZO is that while initial
+      setup of the cluster runs smooth, a month goes by and some sysadmin goes to
+      add a machine to the cluster only they'll have forgotten to do the LZO
+      fixup on the new machine.  In versions since HBase 0.90.0, we should
+      fail in a way that makes it plain what the problem is, but maybe not. </para>
+      <para>See <xref linkend="hbase.regionserver.codecs" />
+      for a feature to help protect against failed LZO install.</para>
     </section>
 
     <section xml:id="gzip.compression">
@@ -1409,7 +1790,9 @@ false
     </title>
     <para>
         If snappy is installed, HBase can make use of it (courtesy of
-        <link xlink:href="http://code.google.com/p/hadoop-snappy/">hadoop-snappy</link>).
+        <link xlink:href="http://code.google.com/p/hadoop-snappy/">hadoop-snappy</link>
+        <footnote><para>See <link xlink:href="http://search-hadoop.com/m/Ds8d51c263B1/%2522Hadoop-Snappy+in+synch+with+Hadoop+trunk%2522&amp;subj=Hadoop+Snappy+in+synch+with+Hadoop+trunk">Alejandro's note</link> up on the list on difference between Snappy in Hadoop
+        and Snappy in HBase</para></footnote>).
 
         <orderedlist>
             <listitem>
@@ -1444,6 +1827,23 @@ hbase> describe 't1'</programlisting>
     <title >FAQ</title>
     <qandaset defaultlabel='faq'>
         <qandadiv><title>General</title>
+        <qandaentry>
+                <question><para>When should I use HBase?</para></question>
+            <answer>
+                <para>
+              Anybody can download and give HBase a spin, even on a laptop.  The scope of this answer is when 
+              would it be best to use HBase in a <emphasis>real</emphasis> deployment.
+                </para>
+                <para>First, make sure you have enough hardware.  Even HDFS doesn't do well with anything less than
+                5 DataNodes (due to things such as HDFS block replication which has a default of 3), plus a NameNode.
+                Second, make sure you have enough data.  HBase isn't suitable for every problem.  If you have 
+                hundreds of millions or billions of rows, then HBase is a good candidate.  If you only have a few 
+                thousand/million rows, then using a traditional RDBMS might be a better choice due to the 
+                fact that all of your data might wind up on a single node (or two) and the rest of the cluster may
+                be sitting idle.
+                </para>
+            </answer>
+        </qandaentry>
         <qandaentry>
                 <question><para>Are there other HBase FAQs?</para></question>
             <answer>
@@ -1480,18 +1880,6 @@ hbase> describe 't1'</programlisting>
                 </para>
             </answer>
         </qandaentry>
-        <qandaentry xml:id="brand.new.compressor">
-            <question><para>Why are logs flooded with '2011-01-10 12:40:48,407 INFO org.apache.hadoop.io.compress.CodecPool: Got
-            brand-new compressor' messages?</para></question>
-            <answer>
-                <para>
-                    Because we are not using the native versions of compression
-                    libraries.  See <link xlink:href="https://issues.apache.org/jira/browse/HBASE-1900">HBASE-1900 Put back native support when hadoop 0.21 is released</link>.
-                    Copy the native libs from hadoop under hbase lib dir or
-                    symlink them into place and the message should go away.
-                </para>
-            </answer>
-        </qandaentry>
     </qandadiv>
     <qandadiv xml:id="ec2"><title>EC2</title>
         <qandaentry>
@@ -1520,38 +1908,33 @@ When I build, why do I always get <code>Unable to find resource 'VM_global_libra
     <qandadiv><title>Runtime</title>
         <qandaentry>
             <question><para>
-                    Loading, why do I see pauses when loading HBase?
+                    I'm having problems with my HBase cluster, how can I troubleshoot it?
             </para></question>
             <answer>
                 <para>
-                    If compression is enabled, see this thread up on the user list,
-                    <link xlink:href="http://search-hadoop.com/m/WUnLM6ojHm1/Long+client+pauses+with+compression&amp;subj=Long+client+pauses+with+compression">Long client pauses with compression</link>.
+                See <xref linkend="trouble" />.
                 </para>
             </answer>
         </qandaentry>
         <qandaentry>
             <question><para>
-                    Why does my RegionServer hang inexplicitly?
+                   How can I improve HBase cluster performance?
             </para></question>
             <answer>
                 <para>
-                Are you running an old JVM (&lt; 1.6.0_u21?)?  When you look at a thread dump,
-                does it look like threads are BLOCKED but no one holds the lock all are
-                blocked on?  See <link xlink:href="https://issues.apache.org/jira/browse/HBASE-3622">HBASE 3622 Deadlock in HBaseServer (JVM bug?)</link>.
-                Adding <code>-XX:+UseMembar</code> to the HBase <varname>HBASE_OPTS</varname> in <filename>conf/hbase-env.sh</filename>
-                may fix it.
+                See <xref linkend="performance" />.
                 </para>
             </answer>
         </qandaentry>
-        <qandaentry>
-            <question><para>
-                    Why do I see double the actual count of regionservers, once by domain name and then by IP?
-            </para></question>
+        <qandaentry xml:id="brand.new.compressor">
+            <question><para>Why are logs flooded with '2011-01-10 12:40:48,407 INFO org.apache.hadoop.io.compress.CodecPool: Got
+            brand-new compressor' messages?</para></question>
             <answer>
                 <para>
-                    Fix your DNS.  In versions of HBase before 0.92.x, reverse DNS needs to give same answer
-                    as forward lookup. See <link xlink:href="https://issues.apache.org/jira/browse/HBASE-3431">HBASE 3431
-                        Regionserver is not using the name given it by the master; double entry in master listing of servers</link> for gorey details.
+                    Because we are not using the native versions of compression
+                    libraries.  See <link xlink:href="https://issues.apache.org/jira/browse/HBASE-1900">HBASE-1900 Put back native support when hadoop 0.21 is released</link>.
+                    Copy the native libs from hadoop under hbase lib dir or
+                    symlink them into place and the message should go away.
                 </para>
             </answer>
         </qandaentry>
@@ -1563,8 +1946,7 @@ When I build, why do I always get <code>Unable to find resource 'VM_global_libra
             </para></question>
             <answer>
                 <para>
-                For a useful introduction to the issues involved maintaining a secondary Index in a store like HBase,
-                see the David Butler message in this thread, <link xlink:href="http://search-hadoop.com/m/nvbiBp2TDP/Stargate%252Bhbase&amp;subj=Stargate+hbase">HBase, mail # user - Stargate+hbase</link>
+                See <xref linkend="secondary.indexes" />
                 </para>
             </answer>
         </qandaentry>
@@ -1575,6 +1957,16 @@ When I build, why do I always get <code>Unable to find resource 'VM_global_libra
             <answer>
                 <para>
                 See <xref linkend="supported.datatypes" />.
+                </para>
+            </answer>
+        </qandaentry>
+        <qandaentry>
+            <question><para>
+                    Back up my HBase Cluster?
+            </para></question>
+            <answer>
+                <para>
+                    See <xref linkend="ops.backup" />
                 </para>
             </answer>
         </qandaentry>
@@ -1591,6 +1983,468 @@ When I build, why do I always get <code>Unable to find resource 'VM_global_libra
   </appendix>
 
 
+<appendix xml:id="hfilev2">
+   <title>HFile format version 2</title>
+
+   <section><title>Motivation </title>
+   <para>We found it necessary to revise the HFile format after encountering high memory usage and slow startup times caused by large Bloom filters and block indexes in the region server. Bloom filters can get as large as 100 MB per HFile, which adds up to 2 GB when aggregated over 20 regions. Block indexes can grow as large as 6 GB in aggregate size over the same set of regions. A region is not considered opened until all of its block index data is loaded. Large Bloom filters produce a different performance problem: the first get request that requires a Bloom filter lookup will incur the latency of loading the entire Bloom filter bit array.</para>
+   <para>To speed up region server startup we break Bloom filters and block indexes into multiple blocks and write those blocks out as they fill up, which also reduces the HFile writer’s memory footprint. In the Bloom filter case, “filling up a block” means accumulating enough keys to efficiently utilize a fixed-size bit array, and in the block index case we accumulate an “index block” of the desired size. Bloom filter blocks and index blocks (we call these “inline blocks”) become interspersed with data blocks, and as a side effect we can no longer rely on the difference between block offsets to determine data block length, as it was done in version 1.</para>
+   <para>HFile is a low-level file format by design, and it should not deal with application-specific details such as Bloom filters, which are handled at StoreFile level. Therefore, we call Bloom filter blocks in an HFile "inline" blocks. We also supply HFile with an interface to write those inline blocks. </para>
+   <para>Another format modification aimed at reducing the region server startup time is to use a contiguous “load-on-open” section that has to be loaded in memory at the time an HFile is being opened. Currently, as an HFile opens, there are separate seek operations to read the trailer, data/meta indexes, and file info. To read the Bloom filter, there are two more seek operations for its “data” and “meta” portions. In version 2, we seek once to read the trailer and seek again to read everything else we need to open the file from a contiguous block.</para></section>
+   <section><title>HFile format version 1 overview </title><para>As we will be discussing the changes we are making to the HFile format, it is useful to give a short overview of the previous (HFile version 1) format. An HFile in the existing format is structured as follows:
+           <inlinemediaobject>
+               <imageobject>
+                   <imagedata align="middle" valign="middle" fileref="hfile.png" />
+               </imageobject>
+               <textobject>
+                 <phrase>HFile Version 1</phrase>
+               </textobject>
+               <caption>
+                   <para>HFile Version 1 
+                 </para>
+               </caption>
+           </inlinemediaobject>
+           <footnote><para>Image courtesy of Lars George, <link xlink:href="http://www.larsgeorge.com/2009/10/hbase-architecture-101-storage.html">hbase-architecture-101-storage.html</link>.</para></footnote>
+       </para>
+       <section><title> Block index format in version 1 </title>
+   <para>The block index in version 1 is very straightforward. For each entry, it contains: </para>
+   <orderedlist>
+      <listitem>
+         <para>Offset (long)</para>
+      </listitem>
+      <listitem>
+         <para>Uncompressed size (int)</para>
+      </listitem>
+      <listitem>
+         <para>Key (a serialized byte array written using Bytes.writeByteArray) </para>
+         <orderedlist>
+             <listitem>
+                 <para>Key length as a variable-length integer (VInt)
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                     Key bytes
+                 </para>
+             </listitem>
+         </orderedlist>
+      </listitem>
+   </orderedlist>
+   <para>The number of entries in the block index is stored in the fixed file trailer, and has to be passed in to the method that reads the block index. One of the limitations of the block index in version 1 is that it does not provide the compressed size of a block, which turns out to be necessary for decompression. Therefore, the HFile reader has to infer this compressed size from the offset difference between blocks. We fix this limitation in version 2, where we store on-disk block size instead of uncompressed size, and get uncompressed size from the block header.</para></section></section><section><title>
+      HBase file format with inline blocks (version 2)
+      </title>
+      <section><title> Overview</title>
+   <para>The version of HBase introducing the above features reads both version 1 and 2 HFiles, but only writes version 2 HFiles. A version 2 HFile is structured as follows:
+           <inlinemediaobject>
+               <imageobject>
+                   <imagedata align="middle" valign="middle" fileref="hfilev2.png" />
+               </imageobject>
+               <textobject>
+                 <phrase>HFile Version 2</phrase>
+               </textobject>
+               <caption>
+                   <para>HFile Version 2 
+                 </para>
+               </caption>
+           </inlinemediaobject>
+
+   </para>
+   </section>
+   <section><title>Unified version 2 block format</title>
+   <para>In the version 2 every block in the data section contains the following fields: </para>
+   <orderedlist>
+      <listitem>
+         <para>8 bytes: Block type, a sequence of bytes equivalent to version 1's "magic records". Supported block types are: </para>
+         <orderedlist>
+             <listitem>
+                 <para>DATA – data blocks
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                     LEAF_INDEX – leaf-level index blocks in a multi-level-block-index
+                 </para>
+             </listitem>
+             <listitem>
+                 <para>
+                     BLOOM_CHUNK – Bloom filter chunks
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                     META – meta blocks (not used for Bloom filters in version 2 anymore) 
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                     INTERMEDIATE_INDEX – intermediate-level index blocks in a multi-level blockindex
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                     ROOT_INDEX – root>level index blocks in a multi>level block index
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                     FILE_INFO – the “file info” block, a small key>value map of metadata
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                     BLOOM_META – a Bloom filter metadata block in the load>on>open section
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                     TRAILER – a fixed>size file trailer. As opposed to the above, this is not an 
+                     HFile v2 block but a fixed>size (for each HFile version) data structure
+                  </para>
+              </listitem>
+             <listitem>
+                 <para>
+                      INDEX_V1 – this block type is only used for legacy HFile v1 block
+                  </para>
+              </listitem>
+         </orderedlist>
+      </listitem>
+      <listitem>
+         <para>Compressed size of the block's data, not including the header (int).
+         </para>
+                 <para>
+Can be used for skipping the current data block when scanning HFile data. 
+                  </para>
+      </listitem>
+      <listitem>
+         <para>Uncompressed size of the block's data, not including the header (int)</para>
+                 <para>
+ This is equal to the compressed size if the compression algorithm is NON
+                  </para>
+      </listitem>
+      <listitem>
+         <para>File offset of the previous block of the same type (long)</para>
+                 <para>
+ Can be used for seeking to the previous data/index block
+                  </para>
+      </listitem>
+      <listitem>
+         <para>Compressed data (or uncompressed data if the compression algorithm is NONE).</para>
+      </listitem>
+   </orderedlist>
+   <para>The above format of blocks is used in the following HFile sections:</para>
+   <orderedlist>
+      <listitem>
+         <para>Scanned block section. The section is named so because it contains all data blocks that need to be read when an HFile is scanned sequentially.  Also contains leaf block index and Bloom chunk blocks. </para>
+      </listitem>
+      <listitem>
+         <para>Non-scanned block section. This section still contains unified-format v2 blocks but it does not have to be read when doing a sequential scan. This section contains “meta” blocks and intermediate-level index blocks.
+         </para>
+      </listitem>
+   </orderedlist>
+   <para>We are supporting “meta” blocks in version 2 the same way they were supported in version 1, even though we do not store Bloom filter data in these blocks anymore. </para></section>
+
+<section><title> Block index in version 2</title>
+   <para>There are three types of block indexes in HFile version 2, stored in two different formats (root and non-root): </para>
+   <orderedlist>
+      <listitem>
+         <para>Data index — version 2 multi-level block index, consisting of:</para>
+         <orderedlist>
+          <listitem>
+             <para>
+ Version 2 root index, stored in the data block index section of the file
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+Optionally, version 2 intermediate levels, stored in the non%root format in   the data index section of the file.    Intermediate levels can only be present if leaf level blocks are present
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+Optionally, version 2 leaf levels, stored in the non%root format inline with   data blocks
+             </para>
+          </listitem>
+      </orderedlist>
+      </listitem>
+      <listitem>
+         <para>Meta index — version 2 root index format only, stored in the meta index section of the file</para>
+      </listitem>
+      <listitem>
+         <para>Bloom index — version 2 root index format only, stored in the “load-on-open” section as part of Bloom filter metadata.</para>
+      </listitem>
+   </orderedlist></section>
+<section><title>
+      Root block index format in version 2</title>
+   <para>This format applies to:</para>
+   <orderedlist>
+      <listitem>
+         <para>Root level of the version 2 data index</para>
+      </listitem>
+      <listitem>
+         <para>Entire meta and Bloom indexes in version 2, which are always single-level. </para>
+      </listitem>
+   </orderedlist>
+   <para>A version 2 root index block is a sequence of entries of the following format, similar to entries of a version 1 block index, but storing on-disk size instead of uncompressed size. </para>
+   <orderedlist>
+      <listitem>
+         <para>Offset (long) </para>
+             <para>
+This offset may point to a data block or to a deeper>level index block.
+             </para>
+      </listitem>
+      <listitem>
+         <para>On-disk size (int) </para>
+      </listitem>
+      <listitem>
+         <para>Key (a serialized byte array stored using Bytes.writeByteArray) </para>
+         <orderedlist>
+          <listitem>
+             <para>Key (VInt)
+             </para>
+          </listitem>
+          <listitem>
+             <para>Key bytes
+             </para>
+          </listitem>
+      </orderedlist>
+      </listitem>
+   </orderedlist>
+   <para>A single-level version 2 block index consists of just a single root index block. To read a root index block of version 2, one needs to know the number of entries. For the data index and the meta index the number of entries is stored in the trailer, and for the Bloom index it is stored in the compound Bloom filter metadata.</para>
+
+   <para>For a multi-level block index we also store the following fields in the root index block in the load-on-open section of the HFile, in addition to the data structure described above:</para>
+   <orderedlist>
+      <listitem>
+         <para>Middle leaf index block offset</para>
+      </listitem>
+      <listitem>
+         <para>Middle leaf block on-disk size (meaning the leaf index block containing the reference to the “middle” data block of the file) </para>
+      </listitem>
+      <listitem>
+         <para>The index of the mid-key (defined below) in the middle leaf-level block.</para>
+      </listitem>
+   </orderedlist>
+   <para/>
+   <para>These additional fields are used to efficiently retrieve the mid-key of the HFile used in HFile splits, which we define as the first key of the block with a zero-based index of (n – 1) / 2, if the total number of blocks in the HFile is n. This definition is consistent with how the mid-key was determined in HFile version 1, and is reasonable in general, because blocks are likely to be the same size on average, but we don’t have any estimates on individual key/value pair sizes. </para>
+   <para/>
+   <para>When writing a version 2 HFile, the total number of data blocks pointed to by every leaf-level index block is kept track of. When we finish writing and the total number of leaf-level blocks is determined, it is clear which leaf-level block contains the mid-key, and the fields listed above are computed.  When reading the HFile and the mid-key is requested, we retrieve the middle leaf index block (potentially from the block cache) and get the mid-key value from the appropriate position inside that leaf block.</para></section>
+<section><title>
+      Non-root block index format in version 2</title>
+   <para>This format applies to intermediate-level and leaf index blocks of a version 2 multi-level data block index. Every non-root index block is structured as follows. </para>
+   <orderedlist>
+      <listitem>
+         <para>numEntries: the number of entries (int). </para>
+      </listitem>
+      <listitem>
+         <para>entryOffsets: the “secondary index” of offsets of entries in the block, to facilitate a quick binary search on the key (numEntries + 1 int values). The last value is the total length of all entries in this index block. For example, in a non-root index block with entry sizes 60, 80, 50 the “secondary index” will contain the following int array: {0, 60, 140, 190}.</para>
+      </listitem>
+      <listitem>
+         <para>Entries. Each entry contains: </para>
+         <orderedlist>
+          <listitem>
+             <para>
+Offset of the block referenced by this entry in the file (long) 
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+On>disk size of the referenced block (int) 
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+Key. The length can be calculated from entryOffsets.
+             </para>
+          </listitem>
+      </orderedlist>
+
+      </listitem>
+   </orderedlist></section><section><title>
+      Bloom filters in version 2</title>
+   <para>In contrast with version 1, in a version 2 HFile Bloom filter metadata is stored in the load-on-open section of the HFile for quick startup. </para>
+   <orderedlist>
+      <listitem>
+         <para>A compound Bloom filter. </para>
+         <orderedlist>
+          <listitem>
+             <para>
+ Bloom filter version = 3 (int). There used to be a DynamicByteBloomFilter class that had the Bloom   filter version number 2
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+The total byte size of all compound Bloom filter chunks (long)
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+ Number of hash functions (int
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+Type of hash functions (int)
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+The total key count inserted into the Bloom filter (long)
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+The maximum total number of keys in the Bloom filter (long)
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+The number of chunks (int)
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+Comparator class used for Bloom filter keys, a UTF>8 encoded string stored   using Bytes.writeByteArray
+             </para>
+          </listitem>
+          <listitem>
+             <para>
+ Bloom block index in the version 2 root block index format
+             </para>
+          </listitem>
+      </orderedlist>
+      </listitem>
+   </orderedlist></section><section><title>File Info format in versions 1 and 2</title>
+   <para>The file info block is a serialized <ulink url="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/io/HbaseMapWritable.html">HbaseMapWritable</ulink> (essentially a map from byte arrays to byte arrays) with the following keys, among others. StoreFile-level logic adds more keys to this.</para>
+   <informaltable frame="all">
+      <tgroup cols="2"><tbody><row>
+            <entry>
+               <para>hfile.LASTKEY </para>
+            </entry>
+            <entry>
+               <para>The last key of the file (byte array) </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para>hfile.AVG_KEY_LEN </para>
+            </entry>
+            <entry>
+               <para>The average key length in the file (int) </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para>hfile.AVG_VALUE_LEN </para>
+            </entry>
+            <entry>
+               <para>The average value length in the file (int) </para>
+            </entry>
+         </row></tbody></tgroup>
+   </informaltable>
+   <para>File info format did not change in version 2. However, we moved the file info to the final section of the file, which can be loaded as one block at the time the HFile is being opened. Also, we do not store comparator in the version 2 file info anymore. Instead, we store it in the fixed file trailer. This is because we need to know the comparator at the time of parsing the load-on-open section of the HFile.</para></section><section><title>
+      Fixed file trailer format differences between versions 1 and 2</title>
+   <para>The following table shows common and different fields between fixed file trailers in versions 1 and 2. Note that the size of the trailer is different depending on the version, so it is “fixed” only within one version. However, the version is always stored as the last four-byte integer in the file. </para>
+   <para/>
+   <informaltable frame="all">
+      <tgroup cols="2">
+<colspec colname='c1'/>
+<colspec colname='c2'/>
+<tbody>
+    <row>
+            <entry>
+               <para>Version 1 </para>
+            </entry>
+            <entry>
+               <para>Version 2 </para>
+            </entry>
+         </row>
+         <row>
+            <entry align="center" namest="c1" nameend="c2">
+               <para>File info offset (long) </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para>Data index offset (long) </para>
+            </entry>
+            <entry>
+                <para>loadOnOpenOffset (long)</para>
+                <para><emphasis>The offset of the section that we need toload when opening the file.</emphasis></para>
+            </entry>
+         </row>
+         <row>
+            <entry align="center" namest="c1" nameend="c2">
+               <para>Number of data index entries (int) </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para>metaIndexOffset (long)</para>
+               <para>This field is not being used by the version 1 reader, so we removed it from version 2.</para>
+            </entry>
+            <entry>
+               <para>uncompressedDataIndexSize (long)</para>
+               <para>The total uncompressed size of the whole data block index, including root-level, intermediate-level, and leaf-level blocks.</para>
+            </entry>
+         </row>
+         <row>
+            <entry namest="c1" nameend="c2" align="center">
+               <para>Number of meta index entries (int) </para>
+            </entry>
+         </row>
+         <row>
+            <entry namest="c1" nameend="c2" align="center">
+               <para>Total uncompressed bytes (long) </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para>numEntries (int) </para>
+            </entry>
+            <entry>
+               <para>numEntries (long) </para>
+            </entry>
+         </row>
+         <row>
+            <entry namest="c1" nameend="c2" align="center">
+               <para>Compression codec: 0 = LZO, 1 = GZ, 2 = NONE (int) </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para></para>
+            </entry>
+            <entry>
+               <para>The number of levels in the data block index (int) </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para></para>
+            </entry>
+            <entry>
+               <para>firstDataBlockOffset (long)</para>
+               <para>The offset of the first first data block. Used when scanning. </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para></para>
+            </entry>
+            <entry>
+               <para>lastDataBlockEnd (long)</para>
+               <para>The offset of the first byte after the last key/value data block. We don't need to go beyond this offset when scanning. </para>
+            </entry>
+         </row>
+         <row>
+            <entry>
+               <para>Version: 1 (int) </para>
+            </entry>
+            <entry>
+               <para>Version: 2 (int) </para>
+            </entry>
+         </row></tbody></tgroup>
+   </informaltable>
+   <para/></section></section></appendix>
 
 
   <index xml:id="book_index">

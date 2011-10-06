@@ -16,7 +16,7 @@
   <groupId>org.apache.hbase</groupId>
   <artifactId>hbase</artifactId>
   <packaging>jar</packaging>
-  <version>0.91.0-SNAPSHOT</version>
+  <version>${hbase.version}</version>
   <name>HBase</name>
   <description>
     HBase is the &amp;lt;a href="http://hadoop.apache.org"&amp;rt;Hadoop&lt;/a&amp;rt; database. Use it when you need
@@ -96,6 +96,14 @@
       <organization>Trend Micro</organization>
       <organizationUrl>http://www.trendmicro.com</organizationUrl>
     </developer>
+  <developer>
+      <id>dmeil</id>
+      <name>Doug Meil</name>
+      <email>dmeil@apache.org</email>
+      <timezone>-5</timezone>
+      <organization>Explorys</organization>
+      <organizationUrl>http://www.explorys.com</organizationUrl>
+    </developer>
     <developer>
       <id>garyh</id>
       <name>Gary Helmling</name>
@@ -115,7 +123,7 @@
     <developer>
       <id>jgray</id>
       <name>Jonathan Gray</name>
-      <email>jgray@streamy.com</email>
+      <email>jgray@fb.com</email>
       <timezone>-8</timezone>
       <organization>Facebook</organization>
       <organizationUrl>http://www.facebook.com</organizationUrl>
@@ -141,8 +149,8 @@
       <name>Ryan Rawson</name>
       <email>rawson@apache.org</email>
       <timezone>-8</timezone>
-      <organization>StumbleUpon</organization>
-      <organizationUrl>http://www.stumbleupon.com</organizationUrl>
+      <organization>CX</organization>
+      <organizationUrl>http://www.cx.com</organizationUrl>
     </developer>
     <developer>
       <id>stack</id>
@@ -153,12 +161,28 @@
       <organizationUrl>http://www.stumbleupon.com/</organizationUrl>
     </developer>
     <developer>
+      <id>tedyu</id>
+      <name>Ted Yu</name>
+      <email>yuzhihong@gmail.com</email>
+      <timezone>-8</timezone>
+      <organization>CarrierIQ</organization>
+      <organizationUrl>http://www.carrieriq.com</organizationUrl>
+    </developer>
+    <developer>
       <id>todd</id>
       <name>Todd Lipcon</name>
       <email>todd@apache.org</email>
       <timezone>-8</timezone>
       <organization>Cloudera</organization>
       <organizationUrl>http://www.cloudera.com</organizationUrl>
+    </developer>
+    <developer>
+      <id>ramkrishna</id>
+      <name>Ramkrishna S Vasudevan</name>
+      <email>ramkrishna@apache.org</email>
+      <timezone>+5</timezone>
+      <organization>Huawei</organization>
+      <organizationUrl>http://www.huawei.com</organizationUrl>
     </developer>
   </developers>
 
@@ -226,11 +250,50 @@
         </plugin>
         <plugin>
           <artifactId>maven-surefire-plugin</artifactId>
+          <version>2.9</version>
           <configuration>
             <forkedProcessTimeoutInSeconds>900</forkedProcessTimeoutInSeconds>
             <argLine>-enableassertions -Xmx1400m</argLine>
             <redirectTestOutputToFile>true</redirectTestOutputToFile>
           </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-site-plugin</artifactId>
+          <version>2.0.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <version>2.9</version>
+          <configuration>
+            <includes>
+              <include>${integrationtest.include}</include>
+            </includes>
+            <excludes>
+              <exlude>${unittest.include}</exlude>
+              <exclude>**/*$*</exclude>
+              <exclude>${test.exclude.pattern}</exclude>
+            </excludes>
+            <environmentVariables>
+              <LD_LIBRARY_PATH>${env.LD_LIBRARY_PATH}:${project.build.directory}/nativelib</LD_LIBRARY_PATH>
+              <DYLD_LIBRARY_PATH>${env.DYLD_LIBRARY_PATH}:${project.build.directory}/nativelib</DYLD_LIBRARY_PATH>
+            </environmentVariables>
+          </configuration>
+          <executions>
+            <execution>
+              <id>integration-test</id>
+              <goals>
+                <goal>integration-test</goal>
+              </goals>
+            </execution>
+            <execution>
+              <id>verify</id>
+              <goals>
+                <goal>verify</goal>
+              </goals>
+            </execution>
+          </executions>
         </plugin>
         <plugin>
           <artifactId>maven-clean-plugin</artifactId>
@@ -248,6 +311,20 @@
           <groupId>org.apache.rat</groupId>
           <artifactId>apache-rat-plugin</artifactId>
           <version>0.6</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-surefire-report-plugin</artifactId>
+          <version>2.9</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.avro</groupId>
+          <artifactId>avro-maven-plugin</artifactId>
+          <version>${avro.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>build-helper-maven-plugin</artifactId>
+          <version>1.5</version>
         </plugin>
       </plugins>
     </pluginManagement>
@@ -268,6 +345,23 @@
     </resources>
 
     <plugins>
+      <plugin>
+        <groupId>org.apache.avro</groupId>
+        <artifactId>avro-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>generate-avro-sources</id>
+            <phase>generate-sources</phase>
+            <goals>
+              <goal>schema</goal>
+              <goal>protocol</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <outputDirectory>${project.build.directory}/generated-sources/java</outputDirectory>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>xml-maven-plugin</artifactId>
@@ -311,6 +405,7 @@
           <sectionLabelIncludesComponentLabel>true</sectionLabelIncludesComponentLabel>
           <targetDirectory>${basedir}/target/site/book/</targetDirectory>
           <htmlStylesheet>../css/freebsd_docbook.css</htmlStylesheet>
+          <imgSrcPath>../images/</imgSrcPath>
         </configuration>
             <goals>
               <goal>generate-html</goal>
@@ -327,6 +422,7 @@
           <sectionLabelIncludesComponentLabel>true</sectionLabelIncludesComponentLabel>
           <targetDirectory>${basedir}/target/site/</targetDirectory>
           <htmlStylesheet>css/freebsd_docbook.css</htmlStylesheet>
+          <imgSrcPath>images/</imgSrcPath>
         </configuration>
             <goals>
               <goal>generate-html</goal>
@@ -410,9 +506,10 @@
         <configuration>
           <forkMode>always</forkMode>
           <includes>
-            <include>**/Test*.java</include>
+            <include>${unittest.include}</include>
           </includes>
           <excludes>
+            <exclude>${integrationtest.include}</exclude>
             <exclude>**/*$*</exclude>
             <exclude>${test.exclude.pattern}</exclude>
           </excludes>
@@ -422,6 +519,11 @@
           </environmentVariables>
         </configuration>
       </plugin>
+      <!--  Run integration tests with mvn verify --> 
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
       <plugin>
         <artifactId>maven-antrun-plugin</artifactId>
         <version>1.6</version>
@@ -430,7 +532,7 @@
             <id>generate</id>
             <phase>generate-sources</phase>
             <configuration>
-              <tasks>
+              <target>
                 <property name="build.webapps"
                           location="${project.build.directory}/hbase-webapps"/>
                 <property name="src.webapps"
@@ -452,20 +554,20 @@
 
                 <mkdir dir="${build.webapps}/master/WEB-INF"/>
                 <jspcompiler uriroot="${src.webapps}/master"
-                             outputdir="${generated.sources}"
+                             outputdir="${generated.sources}/java"
                              package="org.apache.hadoop.hbase.generated.master"
                              webxml="${build.webapps}/master/WEB-INF/web.xml"/>
 
                 <mkdir dir="${build.webapps}/regionserver/WEB-INF"/>
                 <jspcompiler uriroot="${src.webapps}/regionserver"
-                             outputdir="${generated.sources}"
+                             outputdir="${generated.sources}/java"
                              package="org.apache.hadoop.hbase.generated.regionserver"
                              webxml="${build.webapps}/regionserver/WEB-INF/web.xml"/>
 
                 <exec executable="sh">
-                  <arg line="${basedir}/src/saveVersion.sh ${project.version} ${generated.sources}"/>
+                  <arg line="${basedir}/src/saveVersion.sh ${project.version} ${generated.sources}/java"/>
                 </exec>
-              </tasks>
+              </target>
             </configuration>
             <goals>
               <goal>run</goal>
@@ -474,7 +576,7 @@
           <execution>
             <phase>process-resources</phase>
             <configuration>
-              <tasks>
+              <target>
                 <replace file="${project.build.outputDirectory}/hbase-default.xml"
                   token="@@@VERSION@@@" value="${project.version}" />
                 <mkdir dir="${project.build.directory}/nativelib"/>
@@ -482,7 +584,7 @@
                   <arg value="xf"/>
                   <arg value="hadoop-snappy-nativelibs.tar"/>
                 </exec>
-              </tasks>
+              </target>
             </configuration>
             <goals>
               <goal>run</goal>
@@ -529,26 +631,15 @@
         <version>1.5</version>
         <executions>
           <execution>
-            <id>add-jspc-source</id>
+            <id>jspcSource-packageInfo-Avro-source</id>
             <phase>generate-sources</phase>
             <goals>
               <goal>add-source</goal>
             </goals>
             <configuration>
               <sources>
-                <source>${basedir}/target/jspc</source>
-              </sources>
-            </configuration>
-          </execution>
-          <execution>
-            <id>add-package-info</id>
-            <phase>generate-sources</phase>
-            <goals>
-              <goal>add-source</goal>
-            </goals>
-            <configuration>
-              <sources>
-                <source>${project.build.directory}/generated-sources</source>
+                <source>${project.build.directory}/generated-jamon</source>
+                <source>${project.build.directory}/generated-sources/java</source>
               </sources>
             </configuration>
           </execution>
@@ -574,6 +665,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-eclipse-plugin</artifactId>
+        <version>2.8</version>
         <configuration>
           <additionalProjectnatures>
             <projectnature>org.jamon.project.jamonnature</projectnature>
@@ -601,8 +693,11 @@
   <properties>
     <compileSource>1.6</compileSource>
 
+    <!--HBase Version-->
+    <hbase.version>0.93-SNAPSHOT</hbase.version>
+
     <!-- Dependencies -->
-    <avro.version>1.4.1</avro.version>
+    <avro.version>1.5.3</avro.version>
     <commons-cli.version>1.2</commons-cli.version>
     <commons-codec.version>1.4</commons-codec.version>
     <commons-httpclient.version>3.1</commons-httpclient.version><!-- pretty outdated -->
@@ -610,11 +705,7 @@
     <commons-logging.version>1.1.1</commons-logging.version>
     <commons-math.version>2.1</commons-math.version>
     <guava.version>r09</guava.version>
-    <!--The below was made by patching branch-0.20-append
-    at revision 1034499 with this hdfs-895 patch:
-    https://issues.apache.org/jira/secure/attachment/12459473/hdfs-895-branch-20-append.txt
-    -->
-    <hadoop.version>0.20-append-r1057313</hadoop.version>
+    <jackson.version>1.5.5</jackson.version>
     <jasper.version>5.5.23</jasper.version>
     <jaxb-api.version>2.1</jaxb-api.version>
     <jetty.version>6.1.26</jetty.version>
@@ -622,13 +713,13 @@
     <jersey.version>1.4</jersey.version>
     <jruby.version>1.6.0</jruby.version>
     <jsr311.version>1.1.1</jsr311.version>
-    <junit.version>4.8.1</junit.version>
+    <junit.version>4.8.2</junit.version>
     <log4j.version>1.2.16</log4j.version>
     <mockito-all.version>1.8.5</mockito-all.version>
-    <protobuf.version>2.3.0</protobuf.version>
+    <protobuf.version>2.4.0a</protobuf.version>
     <slf4j.version>1.5.8</slf4j.version><!-- newer version available -->
     <stax-api.version>1.0.1</stax-api.version>
-    <thrift.version>0.6.1</thrift.version>
+    <thrift.version>0.7.0</thrift.version>
     <zookeeper.version>3.3.3</zookeeper.version>
     <hadoop-snappy.version>0.0.1-SNAPSHOT</hadoop-snappy.version>
 
@@ -639,10 +730,16 @@
     <package.release>1</package.release>	       
     <!-- also must update this when we bump version -->
     <package.version>0.91.0</package.version>	       
+    <final.name>${project.artifactId}-${project.version}</final.name>
 
     <!-- For flaky tests exclusion -->
     <test.exclude></test.exclude>
     <test.exclude.pattern>**/${test.exclude}.java</test.exclude.pattern>
+    
+    <!-- Test inclusion patterns -->
+    <unittest.include>**/Test*.java</unittest.include>
+    <integrationtest.include>**/IntegrationTest*.java</integrationtest.include>
+    
   </properties>
 
   <!-- Sorted by groups of dependencies then groupId and artifactId -->
@@ -654,9 +751,6 @@
           implementation of the same, because Hadoop also uses this version
         * javax.servlet:jsp-api in favour of org.mortbay.jetty:jsp-api-2.1
         * javax.xml.stream:stax-api in favour of stax:stax-api
-
-      Note: Both org.apache.avro:avro and com.sun.jersey:jersey-json depend on Jackson so the version
-        is chosen which comes first in the list of dependencies (jersey in this case)
     -->
 
     <!-- General dependencies -->
@@ -716,31 +810,9 @@
       </exclusions>
     </dependency>
     <dependency>
-      <groupId>org.apache.hadoop</groupId>
-      <artifactId>hadoop-core</artifactId>
-      <version>${hadoop.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>hsqldb</groupId>
-          <artifactId>hsqldb</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>net.sf.kosmosfs</groupId>
-          <artifactId>kfs</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.eclipse.jdt</groupId>
-          <artifactId>core</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>net.java.dev.jets3t</groupId>
-          <artifactId>jets3t</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>oro</groupId>
-          <artifactId>oro</artifactId>
-        </exclusion>
-      </exclusions>
+      <groupId>org.apache.avro</groupId>
+      <artifactId>avro-ipc</artifactId>
+      <version>${avro.version}</version>
     </dependency>
     <dependency>
       <groupId>org.apache.zookeeper</groupId>
@@ -806,6 +878,29 @@
       <artifactId>servlet-api-2.5</artifactId>
       <version>${jetty.jspapi.version}</version>
     </dependency>
+    <!-- While jackson is also a dependency of both jersey and avro, these 
+         can bring in jars from different, incompatible versions. We force 
+         the same version with these dependencies -->
+    <dependency>
+      <groupId>org.codehaus.jackson</groupId>
+      <artifactId>jackson-core-asl</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.codehaus.jackson</groupId>
+      <artifactId>jackson-mapper-asl</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.codehaus.jackson</groupId>
+      <artifactId>jackson-jaxrs</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.codehaus.jackson</groupId>
+      <artifactId>jackson-xc</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>
@@ -815,7 +910,6 @@
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-log4j12</artifactId>
       <version>${slf4j.version}</version>
-      <scope>runtime</scope>
     </dependency>
     <dependency>
       <!--If this is not in the runtime lib, we get odd
@@ -922,12 +1016,6 @@
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-math</artifactId>
       <version>${commons-math.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.hadoop</groupId>
-      <artifactId>hadoop-test</artifactId>
-      <version>${hadoop.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -1094,6 +1182,359 @@
         </plugins>
       </build>
     </profile>
+
+    <!-- profile for building against Hadoop 0.20.0 : This is the default. -->
+    <profile>
+      <id>hadoop-0.20</id>
+      <activation>
+        <property>
+          <name>!hadoop.profile</name>
+        </property>
+      </activation>
+      <properties>
+        <!--The below was made by patching branch-0.20-append
+        at revision 1034499 with this hdfs-895 patch:
+        https://issues.apache.org/jira/secure/attachment/12459473/hdfs-895-branch-20-append.txt
+        -->
+        <hadoop.version>0.20-append-r1057313</hadoop.version>
+      </properties>
+      <dependencies>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-core</artifactId>
+          <version>${hadoop.version}</version>
+          <exclusions>
+            <exclusion>
+              <groupId>hsqldb</groupId>
+              <artifactId>hsqldb</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.sf.kosmosfs</groupId>
+              <artifactId>kfs</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.eclipse.jdt</groupId>
+              <artifactId>core</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.java.dev.jets3t</groupId>
+              <artifactId>jets3t</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>oro</groupId>
+              <artifactId>oro</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+        <!-- test deps for hadoop-0.20 profile -->
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-test</artifactId>
+          <version>${hadoop.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+
+    <!--
+      profile for building against Hadoop 0.22.0. Activate using:
+       mvn -Dhadoop.profile=22
+    -->
+    <profile>
+      <id>hadoop-0.22</id>
+      <activation>
+        <property>
+          <name>hadoop.profile</name>
+          <value>22</value>
+        </property>
+      </activation>
+      <properties>
+        <hadoop.version>0.22.0-SNAPSHOT</hadoop.version>
+      </properties>
+      <dependencies>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-common</artifactId>
+          <version>${hadoop.version}</version>
+          <exclusions>
+            <!--Needs more work, tightening-->
+            <exclusion>
+              <groupId>hsqldb</groupId>
+              <artifactId>hsqldb</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.sf.kosmosfs</groupId>
+              <artifactId>kfs</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.eclipse.jdt</groupId>
+              <artifactId>core</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.java.dev.jets3t</groupId>
+              <artifactId>jets3t</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>oro</groupId>
+              <artifactId>oro</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>jdiff</groupId>
+              <artifactId>jdiff</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.apache.lucene</groupId>
+              <artifactId>lucene-core</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-hdfs</artifactId>
+          <version>${hadoop.version}</version>
+          <exclusions>
+            <!--Needs more work, tightening-->
+            <exclusion>
+              <groupId>hsqldb</groupId>
+              <artifactId>hsqldb</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.sf.kosmosfs</groupId>
+              <artifactId>kfs</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.eclipse.jdt</groupId>
+              <artifactId>core</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.java.dev.jets3t</groupId>
+              <artifactId>jets3t</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>oro</groupId>
+              <artifactId>oro</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>jdiff</groupId>
+              <artifactId>jdiff</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.apache.lucene</groupId>
+              <artifactId>lucene-core</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-mapred</artifactId>
+          <version>${hadoop.version}</version>
+          <exclusions>
+            <!--Needs more work, tightening-->
+            <exclusion>
+              <groupId>hsqldb</groupId>
+              <artifactId>hsqldb</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.sf.kosmosfs</groupId>
+              <artifactId>kfs</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.eclipse.jdt</groupId>
+              <artifactId>core</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.java.dev.jets3t</groupId>
+              <artifactId>jets3t</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>oro</groupId>
+              <artifactId>oro</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>jdiff</groupId>
+              <artifactId>jdiff</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.apache.lucene</groupId>
+              <artifactId>lucene-core</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+        <!-- test deps for hadoop-0.22 profile -->
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-common-test</artifactId>
+          <version>${hadoop.version}</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-hdfs-test</artifactId>
+          <version>${hadoop.version}</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-mapred-test</artifactId>
+          <version>${hadoop.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+
+    <!--
+      profile for building against Hadoop 0.23.0. Activate using:
+       mvn -Dhadoop.profile=23
+    -->
+    <profile>
+      <id>hadoop-0.23</id>
+      <activation>
+        <property>
+          <name>hadoop.profile</name>
+          <value>23</value>
+        </property>
+      </activation>
+      <properties>
+        <hadoop.version>0.23.0-SNAPSHOT</hadoop.version>
+      </properties>
+      <dependencies>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-common</artifactId>
+          <version>${hadoop.version}</version>
+          <exclusions>
+            <!--Needs more work, tightening-->
+            <exclusion>
+              <groupId>hsqldb</groupId>
+              <artifactId>hsqldb</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.sf.kosmosfs</groupId>
+              <artifactId>kfs</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.eclipse.jdt</groupId>
+              <artifactId>core</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.java.dev.jets3t</groupId>
+              <artifactId>jets3t</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>oro</groupId>
+              <artifactId>oro</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>jdiff</groupId>
+              <artifactId>jdiff</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.apache.lucene</groupId>
+              <artifactId>lucene-core</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+        <!-- need the annotations to avoid compiler issues. This is
+             really an upstream issue with Hadoop -->
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-annotations</artifactId>
+          <version>${hadoop.version}</version>
+          <scope>provided</scope>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-hdfs</artifactId>
+          <version>${hadoop.version}</version>
+          <exclusions>
+            <!--Needs more work, tightening-->
+            <exclusion>
+              <groupId>hsqldb</groupId>
+              <artifactId>hsqldb</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.sf.kosmosfs</groupId>
+              <artifactId>kfs</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.eclipse.jdt</groupId>
+              <artifactId>core</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.java.dev.jets3t</groupId>
+              <artifactId>jets3t</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>oro</groupId>
+              <artifactId>oro</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>jdiff</groupId>
+              <artifactId>jdiff</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.apache.lucene</groupId>
+              <artifactId>lucene-core</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-mapred</artifactId>
+          <version>${hadoop.version}</version>
+          <exclusions>
+            <!--Needs more work, tightening-->
+            <exclusion>
+              <groupId>hsqldb</groupId>
+              <artifactId>hsqldb</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.sf.kosmosfs</groupId>
+              <artifactId>kfs</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.eclipse.jdt</groupId>
+              <artifactId>core</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>net.java.dev.jets3t</groupId>
+              <artifactId>jets3t</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>oro</groupId>
+              <artifactId>oro</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>jdiff</groupId>
+              <artifactId>jdiff</artifactId>
+            </exclusion>
+            <exclusion>
+              <groupId>org.apache.lucene</groupId>
+              <artifactId>lucene-core</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+        <!-- test deps for hadoop-0.23 profile -->
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-common-test</artifactId>
+          <version>${hadoop.version}</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-hdfs-test</artifactId>
+          <version>${hadoop.version}</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
+          <groupId>org.apache.hadoop</groupId>
+          <artifactId>hadoop-mapred-test</artifactId>
+          <version>${hadoop.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
   </profiles>
  
   <!-- See http://jira.codehaus.org/browse/MSITE-443 why the settings need to be here and not in pluginManagement. -->
@@ -1117,34 +1558,9 @@
         </reportSets>
 
       </plugin>
-      <!-- Disabled for now.
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-pmd-plugin</artifactId>
-        <version>2.4</version>
-        <configuration>
-          <targetJdk>${compileSource}</targetJdk>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-checkstyle-plugin</artifactId>
-        <version>2.5</version>
-      </plugin>
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>findbugs-maven-plugin</artifactId>
-        <version>2.3.1</version>
-        <configuration>
-          <findbugsXmlOutput>true</findbugsXmlOutput>
-          <findbugsXmlWithMessages>true</findbugsXmlWithMessages>
-          <xmlOutput>true</xmlOutput>
-        </configuration>
-      </plugin>
-      -->
       <plugin>
         <artifactId>maven-site-plugin</artifactId>
-        <version>2.1</version>
+        <version>2.0.1</version>
         <configuration>
           <inputEncoding>UTF-8</inputEncoding>
           <outputEncoding>UTF-8</outputEncoding>
@@ -1226,6 +1642,25 @@
         <groupId>org.apache.rat</groupId>
         <artifactId>apache-rat-plugin</artifactId>
         <version>0.6</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-report-plugin</artifactId>
+        <version>2.7.2</version>
+        <reportSets>
+          <reportSet>
+            <id>integration-tests</id>
+            <reports>
+              <report>report-only</report>
+            </reports>
+            <configuration>
+              <outputName>failsafe-report</outputName>
+              <reportsDirectories>
+                <reportsDirectory>${project.build.directory}/failsafe-reports</reportsDirectory>
+              </reportsDirectories>
+            </configuration>
+          </reportSet>
+        </reportSets>
       </plugin>
     </plugins>
   </reporting>

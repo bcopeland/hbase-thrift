@@ -28,12 +28,15 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.Server;
+import org.apache.hadoop.hbase.regionserver.ReplicationSourceService;
+import org.apache.hadoop.hbase.regionserver.ReplicationSinkService;
 import org.apache.hadoop.hbase.regionserver.wal.HLog;
 import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
-import org.apache.hadoop.hbase.regionserver.wal.WALObserver;
+import org.apache.hadoop.hbase.regionserver.wal.WALActionsListener;
 import org.apache.hadoop.hbase.replication.ReplicationZookeeper;
 import org.apache.hadoop.hbase.replication.master.ReplicationLogCleaner;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -46,15 +49,16 @@ import static org.apache.hadoop.hbase.HConstants.REPLICATION_SCOPE_LOCAL;
 /**
  * Gateway to Replication.  Used by {@link org.apache.hadoop.hbase.regionserver.HRegionServer}.
  */
-public class Replication implements WALObserver {
-  private final boolean replication;
-  private final ReplicationSourceManager replicationManager;
+public class Replication implements WALActionsListener, 
+  ReplicationSourceService, ReplicationSinkService {
+  private boolean replication;
+  private ReplicationSourceManager replicationManager;
   private final AtomicBoolean replicating = new AtomicBoolean(true);
-  private final ReplicationZookeeper zkHelper;
-  private final Configuration conf;
+  private ReplicationZookeeper zkHelper;
+  private Configuration conf;
   private ReplicationSink replicationSink;
   // Hosting server
-  private final Server server;
+  private Server server;
 
   /**
    * Instantiate the replication management (if rep is enabled).
@@ -63,16 +67,30 @@ public class Replication implements WALObserver {
    * @param logDir
    * @param oldLogDir directory where logs are archived
    * @throws IOException
-   * @throws KeeperException 
    */
   public Replication(final Server server, final FileSystem fs,
-      final Path logDir, final Path oldLogDir)
-  throws IOException, KeeperException {
+      final Path logDir, final Path oldLogDir) throws IOException{
+    initialize(server, fs, logDir, oldLogDir);
+  }
+
+  /**
+   * Empty constructor
+   */
+  public Replication() {
+  }
+
+  public void initialize(final Server server, final FileSystem fs,
+      final Path logDir, final Path oldLogDir) throws IOException {
     this.server = server;
     this.conf = this.server.getConfiguration();
     this.replication = isReplication(this.conf);
     if (replication) {
-      this.zkHelper = new ReplicationZookeeper(server, this.replicating);
+      try {
+        this.zkHelper = new ReplicationZookeeper(server, this.replicating);
+      } catch (KeeperException ke) {
+        throw new IOException("Failed replication handler create " +
+           "(replicating=" + this.replicating, ke);
+      }
       this.replicationManager = new ReplicationSourceManager(zkHelper, conf,
           this.server, fs, this.replicating, logDir, oldLogDir) ;
     } else {
@@ -81,12 +99,25 @@ public class Replication implements WALObserver {
     }
   }
 
-  /**
-   * @param c Configuration to look at
-   * @return True if replication is enabled.
-   */
+   /**
+    * @param c Configuration to look at
+    * @return True if replication is enabled.
+    */
   public static boolean isReplication(final Configuration c) {
     return c.getBoolean(REPLICATION_ENABLE_KEY, false);
+  }
+
+   /*
+    * Returns an object to listen to new hlog changes
+    **/
+  public WALActionsListener getWALActionsListener() {
+    return this;
+  }
+  /**
+   * Stops replication service.
+   */
+  public void stopReplicationService() {
+    join();
   }
 
   /**
@@ -114,7 +145,7 @@ public class Replication implements WALObserver {
    * it starts
    * @throws IOException
    */
-  public void startReplicationServices() throws IOException {
+  public void startReplicationService() throws IOException {
     if (this.replication) {
       this.replicationManager.init();
       this.replicationSink = new ReplicationSink(this.conf, this.server);
@@ -132,12 +163,18 @@ public class Replication implements WALObserver {
   @Override
   public void visitLogEntryBeforeWrite(HRegionInfo info, HLogKey logKey,
       WALEdit logEdit) {
+    // Not interested
+  }
+
+  @Override
+  public void visitLogEntryBeforeWrite(HTableDescriptor htd, HLogKey logKey,
+                                       WALEdit logEdit) {
     NavigableMap<byte[], Integer> scopes =
         new TreeMap<byte[], Integer>(Bytes.BYTES_COMPARATOR);
     byte[] family;
     for (KeyValue kv : logEdit.getKeyValues()) {
       family = kv.getFamily();
-      int scope = info.getTableDesc().getFamily(family).getScope();
+      int scope = htd.getFamily(family).getScope();
       if (scope != REPLICATION_SCOPE_LOCAL &&
           !scopes.containsKey(family)) {
         scopes.put(family, scope);
@@ -149,8 +186,23 @@ public class Replication implements WALObserver {
   }
 
   @Override
-  public void logRolled(Path p) {
-    getReplicationManager().logRolled(p);
+  public void preLogRoll(Path oldPath, Path newPath) throws IOException {
+    // Not interested
+  }
+
+  @Override
+  public void postLogRoll(Path oldPath, Path newPath) {
+    getReplicationManager().logRolled(newPath);
+  }
+
+  @Override
+  public void preLogArchive(Path oldPath, Path newPath) throws IOException {
+    // Not interested
+  }
+
+  @Override
+  public void postLogArchive(Path oldPath, Path newPath) throws IOException {
+    // Not interested
   }
 
   /**

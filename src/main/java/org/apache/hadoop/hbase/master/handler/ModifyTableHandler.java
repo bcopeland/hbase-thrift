@@ -25,8 +25,8 @@ import java.util.List;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.Server;
-import org.apache.hadoop.hbase.catalog.MetaEditor;
 import org.apache.hadoop.hbase.master.MasterServices;
+import org.apache.hadoop.hbase.util.Bytes;
 
 public class ModifyTableHandler extends TableEventHandler {
   private final HTableDescriptor htd;
@@ -36,19 +36,19 @@ public class ModifyTableHandler extends TableEventHandler {
       final MasterServices masterServices) throws IOException {
     super(EventType.C_M_MODIFY_TABLE, tableName, server, masterServices);
     this.htd = htd;
+    if (!Bytes.equals(tableName, htd.getName())) {
+      throw new IOException("TableDescriptor name & tableName must match: " 
+          + htd.getNameAsString() + " vs " + Bytes.toString(tableName));
+    }
   }
 
   @Override
   protected void handleTableOperation(List<HRegionInfo> hris)
   throws IOException {
-    for (HRegionInfo hri : hris) {
-      // Update region info in META
-      hri.setTableDesc(this.htd);
-      MetaEditor.updateRegionInfo(this.server.getCatalogTracker(), hri);
-      // Update region info in FS
-      this.masterServices.getMasterFileSystem().updateRegionInfo(hri);
-    }
+    // Update descriptor
+    this.masterServices.getTableDescriptors().add(this.htd);
   }
+
   @Override
   public String toString() {
     String name = "UnknownServerName";

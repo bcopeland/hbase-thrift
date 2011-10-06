@@ -21,6 +21,8 @@
 package org.apache.hadoop.hbase.coprocessor;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -30,10 +32,17 @@ import org.apache.hadoop.hbase.HBaseTestCase;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.coprocessor.Coprocessor.Priority;
+import org.apache.hadoop.hbase.CoprocessorEnvironment;
+import org.apache.hadoop.hbase.Coprocessor;
+import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.RegionCoprocessorHost;
 import org.apache.hadoop.hbase.regionserver.HRegion;
+import org.apache.hadoop.hbase.regionserver.RegionScanner;
 import org.apache.hadoop.hbase.regionserver.SplitTransaction;
+import org.apache.hadoop.hbase.regionserver.Store;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.PairOfSameType;
 import org.apache.hadoop.hbase.Server;
@@ -47,6 +56,41 @@ public class TestCoprocessorInterface extends HBaseTestCase {
   private static final HBaseTestingUtility TEST_UTIL =
     new HBaseTestingUtility();
 
+  private static class CustomScanner implements RegionScanner {
+
+    private RegionScanner delegate;
+    
+    public CustomScanner(RegionScanner delegate) {
+      this.delegate = delegate;
+    }
+    
+    @Override
+    public boolean next(List<KeyValue> results) throws IOException {
+      return delegate.next(results);
+    }
+
+    @Override
+    public boolean next(List<KeyValue> result, int limit) throws IOException {
+      return delegate.next(result, limit);
+    }
+
+    @Override
+    public void close() throws IOException {
+      delegate.close();
+    }
+
+    @Override
+    public HRegionInfo getRegionInfo() {
+      return delegate.getRegionInfo();
+    }
+
+    @Override
+    public boolean isFilterDone() {
+      return delegate.isFilterDone();
+    }
+    
+  }
+  
   public static class CoprocessorImpl extends BaseRegionObserver {
 
     private boolean startCalled;
@@ -89,11 +133,14 @@ public class TestCoprocessorInterface extends HBaseTestCase {
       postCloseCalled = true;
     }
     @Override
-    public void preCompact(ObserverContext<RegionCoprocessorEnvironment> e, boolean willSplit) {
+    public InternalScanner preCompact(ObserverContext<RegionCoprocessorEnvironment> e,
+        Store store, InternalScanner scanner) {
       preCompactCalled = true;
+      return scanner;
     }
     @Override
-    public void postCompact(ObserverContext<RegionCoprocessorEnvironment> e, boolean willSplit) {
+    public void postCompact(ObserverContext<RegionCoprocessorEnvironment> e,
+        Store store, StoreFile resultFile) {
       postCompactCalled = true;
     }
     @Override
@@ -111,6 +158,12 @@ public class TestCoprocessorInterface extends HBaseTestCase {
     @Override
     public void postSplit(ObserverContext<RegionCoprocessorEnvironment> e, HRegion l, HRegion r) {
       postSplitCalled = true;
+    }
+
+    @Override
+    public RegionScanner postScannerOpen(final ObserverContext<RegionCoprocessorEnvironment> e,
+        final Scan scan, final RegionScanner s) throws IOException {
+      return new CustomScanner(s);
     }
 
     boolean wasStarted() {
@@ -147,7 +200,11 @@ public class TestCoprocessorInterface extends HBaseTestCase {
       addContent(region, fam3);
       region.flushcache();
     }
-    byte [] splitRow = region.compactStores();
+    
+    region.compactStores();
+
+    byte [] splitRow = region.checkSplit();
+    
     assertNotNull(splitRow);
     HRegion [] regions = split(region, splitRow);
     for (int i = 0; i < regions.length; i++) {
@@ -157,6 +214,14 @@ public class TestCoprocessorInterface extends HBaseTestCase {
     region.getLog().closeAndDelete();
     Coprocessor c = region.getCoprocessorHost().
       findCoprocessor(CoprocessorImpl.class.getName());
+
+    // HBASE-4197
+    Scan s = new Scan();
+    RegionScanner scanner = regions[0].getCoprocessorHost().postScannerOpen(s, regions[0].getScanner(s));
+    assertTrue(scanner instanceof CustomScanner);
+    // this would throw an exception before HBASE-4197
+    scanner.next(new ArrayList<KeyValue>());
+    
     assertTrue("Coprocessor not started", ((CoprocessorImpl)c).wasStarted());
     assertTrue("Coprocessor not stopped", ((CoprocessorImpl)c).wasStopped());
     assertTrue(((CoprocessorImpl)c).wasOpened());
@@ -180,9 +245,10 @@ public class TestCoprocessorInterface extends HBaseTestCase {
 
   HRegion reopenRegion(final HRegion closedRegion, Class<?> implClass)
       throws IOException {
-    HRegion r = new HRegion(closedRegion.getRegionDir(), closedRegion.getLog(),
+    //HRegionInfo info = new HRegionInfo(tableName, null, null, false);
+    HRegion r = new HRegion(closedRegion.getTableDir(), closedRegion.getLog(),
         closedRegion.getFilesystem(), closedRegion.getConf(),
-        closedRegion.getRegionInfo(), null);
+        closedRegion.getRegionInfo(), closedRegion.getTableDesc(), null);
     r.initialize();
 
     // this following piece is a hack. currently a coprocessorHost
@@ -192,7 +258,7 @@ public class TestCoprocessorInterface extends HBaseTestCase {
     RegionCoprocessorHost host = new RegionCoprocessorHost(r, null, conf);
     r.setCoprocessorHost(host);
 
-    host.load(implClass, Priority.USER);
+    host.load(implClass, Coprocessor.PRIORITY_USER, conf);
     // we need to manually call pre- and postOpen here since the
     // above load() is not the real case for CP loading. A CP is
     // expected to be loaded by default from 1) configuration; or 2)
@@ -211,15 +277,15 @@ public class TestCoprocessorInterface extends HBaseTestCase {
     for(byte [] family : families) {
       htd.addFamily(new HColumnDescriptor(family));
     }
-    HRegionInfo info = new HRegionInfo(htd, null, null, false);
+    HRegionInfo info = new HRegionInfo(tableName, null, null, false);
     Path path = new Path(DIR + callingMethod);
-    HRegion r = HRegion.createHRegion(info, path, conf);
+    HRegion r = HRegion.createHRegion(info, path, conf, htd);
 
     // this following piece is a hack.
     RegionCoprocessorHost host = new RegionCoprocessorHost(r, null, conf);
     r.setCoprocessorHost(host);
 
-    host.load(implClass, Priority.USER);
+    host.load(implClass, Coprocessor.PRIORITY_USER, conf);
 
     Coprocessor c = host.findCoprocessor(implClass.getName());
     assertNotNull(c);

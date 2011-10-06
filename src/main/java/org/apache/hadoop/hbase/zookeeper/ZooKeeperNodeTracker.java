@@ -19,6 +19,8 @@
  */
 package org.apache.hadoop.hbase.zookeeper;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.Abortable;
 import org.apache.zookeeper.KeeperException;
 
@@ -32,6 +34,8 @@ import org.apache.zookeeper.KeeperException;
  * RegionServers.
  */
 public abstract class ZooKeeperNodeTracker extends ZooKeeperListener {
+  
+  static final Log LOG = LogFactory.getLog(ZooKeeperNodeTracker.class);
   /** Path of node being tracked */
   protected final String node;
 
@@ -75,6 +79,7 @@ public abstract class ZooKeeperNodeTracker extends ZooKeeperListener {
           this.data = data;
         } else {
           // It existed but now does not, try again to ensure a watch is set
+          LOG.debug("Try starting again because there is no data from " + node);
           start();
         }
       }
@@ -96,7 +101,7 @@ public abstract class ZooKeeperNodeTracker extends ZooKeeperListener {
    */
   public synchronized byte [] blockUntilAvailable()
   throws InterruptedException {
-    return blockUntilAvailable(0);
+    return blockUntilAvailable(0, false);
   }
 
   /**
@@ -108,12 +113,19 @@ public abstract class ZooKeeperNodeTracker extends ZooKeeperListener {
    * @return data of the node
    * @throws InterruptedException if the waiting thread is interrupted
    */
-  public synchronized byte [] blockUntilAvailable(long timeout)
+  public synchronized byte [] blockUntilAvailable(long timeout, boolean refresh)
   throws InterruptedException {
     if (timeout < 0) throw new IllegalArgumentException();
     boolean notimeout = timeout == 0;
     long startTime = System.currentTimeMillis();
     long remaining = timeout;
+    if (refresh) {
+      try {
+        this.data = ZKUtil.getDataAndWatch(watcher, node);
+      } catch(KeeperException e) {
+        abortable.abort("Unexpected exception handling blockUntilAvailable", e);
+      }
+    }
     while (!this.stopped && (notimeout || remaining > 0) && this.data == null) {
       if (notimeout) {
         wait();
@@ -122,7 +134,7 @@ public abstract class ZooKeeperNodeTracker extends ZooKeeperListener {
       wait(remaining);
       remaining = timeout - (System.currentTimeMillis() - startTime);
     }
-    return data;
+    return this.data;
   }
 
   /**
@@ -131,11 +143,18 @@ public abstract class ZooKeeperNodeTracker extends ZooKeeperListener {
    * <p>If the node is currently available, the most up-to-date known version of
    * the data is returned.  If the node is not currently available, null is
    * returned.
-   *
+   * @param whether to refresh the data by calling ZK directly.
    * @return data of the node, null if unavailable
    */
-  public synchronized byte [] getData() {
-    return data;
+  public synchronized byte [] getData(boolean refresh) {
+    if (refresh) {
+      try {
+        this.data = ZKUtil.getDataAndWatch(watcher, node);
+      } catch(KeeperException e) {
+        abortable.abort("Unexpected exception handling getData", e);
+      }
+    }
+    return this.data;
   }
 
   public String getNode() {
@@ -178,5 +197,25 @@ public abstract class ZooKeeperNodeTracker extends ZooKeeperListener {
     if(path.equals(node)) {
       nodeCreated(path);
     }
+  }
+  
+  /**
+   * Checks if the baseznode set as per the property 'zookeeper.znode.parent'
+   * exists.
+   * @return true if baseznode exists.
+   *         false if doesnot exists.
+   */
+  public boolean checkIfBaseNodeAvailable() {
+    try {
+      if (ZKUtil.checkExists(watcher, watcher.baseZNode) == -1) {
+        return false;
+      }
+    } catch (KeeperException e) {
+      abortable
+          .abort(
+              "Exception while checking if basenode exists.",
+              e);
+    }
+    return true;
   }
 }

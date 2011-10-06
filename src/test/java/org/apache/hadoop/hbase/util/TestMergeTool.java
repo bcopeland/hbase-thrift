@@ -60,6 +60,11 @@ public class TestMergeTool extends HBaseTestCase {
   public void setUp() throws Exception {
     // Set the timeout down else this test will take a while to complete.
     this.conf.setLong("hbase.zookeeper.recoverable.waittime", 1000);
+    // Make it so we try and connect to a zk that is not there (else we might
+    // find a zk ensemble put up by another concurrent test and this will
+    // mess up this test.  Choose unlikely port. Default test port is 21818.
+    // Default zk port is 2181.
+    this.conf.setInt("hbase.zookeeper.property.clientPort", 10001);
 
     this.conf.set("hbase.hstore.compactionThreshold", "2");
 
@@ -71,31 +76,36 @@ public class TestMergeTool extends HBaseTestCase {
      * Create the HRegionInfos for the regions.
      */
     // Region 0 will contain the key range [row_0200,row_0300)
-    sourceRegions[0] = new HRegionInfo(this.desc, Bytes.toBytes("row_0200"),
+    sourceRegions[0] = new HRegionInfo(this.desc.getName(),
+        Bytes.toBytes("row_0200"),
       Bytes.toBytes("row_0300"));
 
     // Region 1 will contain the key range [row_0250,row_0400) and overlaps
     // with Region 0
     sourceRegions[1] =
-      new HRegionInfo(this.desc, Bytes.toBytes("row_0250"),
+      new HRegionInfo(this.desc.getName(),
+          Bytes.toBytes("row_0250"),
           Bytes.toBytes("row_0400"));
 
     // Region 2 will contain the key range [row_0100,row_0200) and is adjacent
     // to Region 0 or the region resulting from the merge of Regions 0 and 1
     sourceRegions[2] =
-      new HRegionInfo(this.desc, Bytes.toBytes("row_0100"),
+      new HRegionInfo(this.desc.getName(),
+          Bytes.toBytes("row_0100"),
           Bytes.toBytes("row_0200"));
 
     // Region 3 will contain the key range [row_0500,row_0600) and is not
     // adjacent to any of Regions 0, 1, 2 or the merged result of any or all
     // of those regions
     sourceRegions[3] =
-      new HRegionInfo(this.desc, Bytes.toBytes("row_0500"),
+      new HRegionInfo(this.desc.getName(),
+          Bytes.toBytes("row_0500"),
           Bytes.toBytes("row_0600"));
 
     // Region 4 will have empty start and end keys and overlaps all regions.
     sourceRegions[4] =
-      new HRegionInfo(this.desc, HConstants.EMPTY_BYTE_ARRAY,
+      new HRegionInfo(this.desc.getName(),
+          HConstants.EMPTY_BYTE_ARRAY,
           HConstants.EMPTY_BYTE_ARRAY);
 
     /*
@@ -129,12 +139,14 @@ public class TestMergeTool extends HBaseTestCase {
     try {
       // Create root and meta regions
       createRootAndMetaRegions();
+      FSUtils.createTableDescriptor(this.fs, this.testDir, this.desc);
       /*
        * Create the regions we will merge
        */
       for (int i = 0; i < sourceRegions.length; i++) {
         regions[i] =
-          HRegion.createHRegion(this.sourceRegions[i], this.testDir, this.conf);
+          HRegion.createHRegion(this.sourceRegions[i], this.testDir, this.conf,
+              this.desc);
         /*
          * Insert data
          */
@@ -179,12 +191,12 @@ public class TestMergeTool extends HBaseTestCase {
     int errCode = ToolRunner.run(this.conf, merger,
       new String[] {this.desc.getNameAsString(), regionName1, regionName2}
     );
-    assertTrue("'" + msg + "' failed", errCode == 0);
+    assertTrue("'" + msg + "' failed with errCode " + errCode, errCode == 0);
     HRegionInfo mergedInfo = merger.getMergedHRegionInfo();
 
     // Now verify that we can read all the rows from regions 0, 1
     // in the new merged region.
-    HRegion merged = HRegion.openHRegion(mergedInfo, log, this.conf);
+    HRegion merged = HRegion.openHRegion(mergedInfo, this.desc, log, this.conf);
     verifyMerge(merged, upperbound);
     merged.close();
     LOG.info("Verified " + msg);

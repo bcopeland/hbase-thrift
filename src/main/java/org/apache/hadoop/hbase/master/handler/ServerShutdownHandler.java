@@ -54,14 +54,18 @@ public class ServerShutdownHandler extends EventHandler {
   private final ServerName serverName;
   private final MasterServices services;
   private final DeadServer deadServers;
+  private final boolean shouldSplitHlog; // whether to split HLog or not
 
   public ServerShutdownHandler(final Server server, final MasterServices services,
-      final DeadServer deadServers, final ServerName serverName) {
-    this(server, services, deadServers, serverName, EventType.M_SERVER_SHUTDOWN);
+      final DeadServer deadServers, final ServerName serverName,
+      final boolean shouldSplitHlog) {
+    this(server, services, deadServers, serverName, EventType.M_SERVER_SHUTDOWN,
+        shouldSplitHlog);
   }
 
   ServerShutdownHandler(final Server server, final MasterServices services,
-      final DeadServer deadServers, final ServerName serverName, EventType type) {
+      final DeadServer deadServers, final ServerName serverName, EventType type,
+      final boolean shouldSplitHlog) {
     super(server, type);
     this.serverName = serverName;
     this.server = server;
@@ -69,6 +73,16 @@ public class ServerShutdownHandler extends EventHandler {
     this.deadServers = deadServers;
     if (!this.deadServers.contains(this.serverName)) {
       LOG.warn(this.serverName + " is NOT in deadservers; it should be!");
+    }
+    this.shouldSplitHlog = shouldSplitHlog;
+  }
+
+  @Override
+  public String getInformativeName() {
+    if (serverName != null) {
+      return this.getClass().getSimpleName() + " for " + serverName;
+    } else {
+      return super.getInformativeName();
     }
   }
 
@@ -83,12 +97,49 @@ public class ServerShutdownHandler extends EventHandler {
    * @throws IOException
    * @throws KeeperException
    */
-  private void verifyAndAssignRoot() 
+  private void verifyAndAssignRoot()
   throws InterruptedException, IOException, KeeperException {
     long timeout = this.server.getConfiguration().
       getLong("hbase.catalog.verification.timeout", 1000);
     if (!this.server.getCatalogTracker().verifyRootRegionLocation(timeout)) {
-      this.services.getAssignmentManager().assignRoot();     
+      this.services.getAssignmentManager().assignRoot();
+    }
+  }
+
+  /**
+   * Failed many times, shutdown processing
+   * @throws IOException
+   */
+  private void verifyAndAssignRootWithRetries() throws IOException {
+    int iTimes = this.server.getConfiguration().getInt(
+        "hbase.catalog.verification.retries", 10);
+
+    long waitTime = this.server.getConfiguration().getLong(
+        "hbase.catalog.verification.timeout", 1000);
+
+    int iFlag = 0;
+    while (true) {
+      try {
+        verifyAndAssignRoot();
+        break;
+      } catch (KeeperException e) {
+        this.server.abort("In server shutdown processing, assigning root", e);
+        throw new IOException("Aborting", e);
+      } catch (Exception e) {
+        if (iFlag >= iTimes) {
+          this.server.abort("verifyAndAssignRoot failed after" + iTimes
+              + " times retries, aborting", e);
+          throw new IOException("Aborting", e);
+        }
+        try {
+          Thread.sleep(waitTime);
+        } catch (InterruptedException e1) {
+          LOG.warn("Interrupted when is the thread sleep", e1);
+          Thread.currentThread().interrupt();
+          throw new IOException("Interrupted", e1);
+        }
+        iFlag++;
+      }
     }
   }
   
@@ -114,91 +165,128 @@ public class ServerShutdownHandler extends EventHandler {
     }
     return getClass().getSimpleName() + "-" + name + "-" + getSeqid();
   }
-  
+
   @Override
   public void process() throws IOException {
     final ServerName serverName = this.serverName;
 
-    LOG.info("Splitting logs for " + serverName);
-    this.services.getMasterFileSystem().splitLog(serverName);
+    try {
 
-    // Clean out anything in regions in transition.  Being conservative and
-    // doing after log splitting.  Could do some states before -- OPENING?
-    // OFFLINE? -- and then others after like CLOSING that depend on log
-    // splitting.
-    List<RegionState> regionsInTransition =
-      this.services.getAssignmentManager().processServerShutdown(this.serverName);
-
-    // Assign root and meta if we were carrying them.
-    if (isCarryingRoot()) { // -ROOT-
-      try {
-        verifyAndAssignRoot();
-      } catch (KeeperException e) {
-        this.server.abort("In server shutdown processing, assigning root", e);
-        throw new IOException("Aborting", e);
-      } catch (InterruptedException e1) {
-        LOG.warn("Interrupted while verifying root region's location", e1);
-        Thread.currentThread().interrupt();
-        throw new IOException(e1);  
+      if ( this.shouldSplitHlog ) {
+        LOG.info("Splitting logs for " + serverName);
+        this.services.getMasterFileSystem().splitLog(serverName);
       }
-    }
 
-    // Carrying meta?
-    if (isCarryingMeta()) this.services.getAssignmentManager().assignMeta();
-
-    // Wait on meta to come online; we need it to progress.
-    // TODO: Best way to hold strictly here?  We should build this retry logic
-    // into the MetaReader operations themselves.
-    // TODO: Is the reading of .META. necessary when the Master has state of
-    // cluster in its head?  It should be possible to do without reading .META.
-    // in all but one case. On split, the RS updates the .META.
-    // table and THEN informs the master of the split via zk nodes in
-    // 'unassigned' dir.  Currently the RS puts ephemeral nodes into zk so if
-    // the regionserver dies, these nodes do not stick around and this server
-    // shutdown processing does fixup (see the fixupDaughters method below).
-    // If we wanted to skip the .META. scan, we'd have to change at least the
-    // final SPLIT message to be permanent in zk so in here we'd know a SPLIT
-    // completed (zk is updated after edits to .META. have gone in).  See
-    // {@link SplitTransaction}.  We'd also have to be figure another way for
-    // doing the below .META. daughters fixup.
-    NavigableMap<HRegionInfo, Result> hris = null;
-    while (!this.server.isStopped()) {
-      try {
-        this.server.getCatalogTracker().waitForMeta();
-        hris = MetaReader.getServerUserRegions(this.server.getCatalogTracker(),
-          this.serverName);
-        break;
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new IOException("Interrupted", e);
-      } catch (IOException ioe) {
-        LOG.info("Received exception accessing META during server shutdown of " +
-            serverName + ", retrying META read");
+      // Assign root and meta if we were carrying them.
+      if (isCarryingRoot()) { // -ROOT-
+        LOG.info("Server " + serverName +
+            " was carrying ROOT. Trying to assign.");
+        this.services.getAssignmentManager().
+        regionOffline(HRegionInfo.ROOT_REGIONINFO);
+        verifyAndAssignRootWithRetries();
       }
-    }
 
-    // Skip regions that were in transition unless CLOSING or PENDING_CLOSE
-    for (RegionState rit : regionsInTransition) {
-      if (!rit.isClosing() && !rit.isPendingClose()) {
-        LOG.debug("Removed " + rit.getRegion().getRegionNameAsString() +
-          " from list of regions to assign because in RIT");
-        hris.remove(rit.getRegion());
+      // Carrying meta?
+      if (isCarryingMeta()) {
+        LOG.info("Server " + serverName +
+          " was carrying META. Trying to assign.");
+        this.services.getAssignmentManager().
+        regionOffline(HRegionInfo.FIRST_META_REGIONINFO);
+        this.services.getAssignmentManager().assignMeta();
       }
-    }
 
-    LOG.info("Reassigning " + hris.size() + " region(s) that " + serverName +
-      " was carrying (skipping " + regionsInTransition.size() +
+      // We don't want worker thread in the MetaServerShutdownHandler
+      // executor pool to block by waiting availability of -ROOT-
+      // and .META. server. Otherwise, it could run into the following issue:
+      // 1. The current MetaServerShutdownHandler instance For RS1 waits for the .META.
+      //    to come online.
+      // 2. The newly assigned .META. region server RS2 was shutdown right after
+      //    it opens the .META. region. So the MetaServerShutdownHandler
+      //    instance For RS1 will still be blocked.
+      // 3. The new instance of MetaServerShutdownHandler for RS2 is queued.
+      // 4. The newly assigned .META. region server RS3 was shutdown right after
+      //    it opens the .META. region. So the MetaServerShutdownHandler
+      //    instance For RS1 and RS2 will still be blocked.
+      // 5. The new instance of MetaServerShutdownHandler for RS3 is queued.
+      // 6. Repeat until we run out of MetaServerShutdownHandler worker threads
+      // The solution here is to resubmit a ServerShutdownHandler request to process
+      // user regions on that server so that MetaServerShutdownHandler
+      // executor pool is always available.
+      if (isCarryingRoot() || isCarryingMeta()) { // -ROOT- or .META.
+        this.services.getExecutorService().submit(new ServerShutdownHandler(
+          this.server, this.services, this.deadServers, serverName, false));
+        this.deadServers.add(serverName);
+        return;
+      }
+
+      // Clean out anything in regions in transition.  Being conservative and
+      // doing after log splitting.  Could do some states before -- OPENING?
+      // OFFLINE? -- and then others after like CLOSING that depend on log
+      // splitting.
+      List<RegionState> regionsInTransition =
+        this.services.getAssignmentManager()
+        .processServerShutdown(this.serverName);
+
+
+      // Wait on meta to come online; we need it to progress.
+      // TODO: Best way to hold strictly here?  We should build this retry logic
+      // into the MetaReader operations themselves.
+      // TODO: Is the reading of .META. necessary when the Master has state of
+      // cluster in its head?  It should be possible to do without reading .META.
+      // in all but one case. On split, the RS updates the .META.
+      // table and THEN informs the master of the split via zk nodes in
+      // 'unassigned' dir.  Currently the RS puts ephemeral nodes into zk so if
+      // the regionserver dies, these nodes do not stick around and this server
+      // shutdown processing does fixup (see the fixupDaughters method below).
+      // If we wanted to skip the .META. scan, we'd have to change at least the
+      // final SPLIT message to be permanent in zk so in here we'd know a SPLIT
+      // completed (zk is updated after edits to .META. have gone in).  See
+      // {@link SplitTransaction}.  We'd also have to be figure another way for
+      // doing the below .META. daughters fixup.
+      NavigableMap<HRegionInfo, Result> hris = null;
+      while (!this.server.isStopped()) {
+        try {
+          this.server.getCatalogTracker().waitForMeta();
+          hris = MetaReader.getServerUserRegions(this.server.getCatalogTracker(),
+              this.serverName);
+          break;
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new IOException("Interrupted", e);
+        } catch (IOException ioe) {
+          LOG.info("Received exception accessing META during server shutdown of " +
+              serverName + ", retrying META read", ioe);
+        }
+      }
+
+      // Skip regions that were in transition unless CLOSING or PENDING_CLOSE
+      for (RegionState rit : regionsInTransition) {
+        if (!rit.isClosing() && !rit.isPendingClose()) {
+          LOG.debug("Removed " + rit.getRegion().getRegionNameAsString() +
+          " from list of regions to assign because in RIT" + " region state: "
+          + rit.getState());
+          hris.remove(rit.getRegion());
+        }
+      }
+
+      LOG.info("Reassigning " + (hris == null? 0: hris.size()) +
+          " region(s) that " + serverName +
+          " was carrying (skipping " + regionsInTransition.size() +
       " regions(s) that are already in transition)");
 
-    // Iterate regions that were on this server and assign them
-    for (Map.Entry<HRegionInfo, Result> e: hris.entrySet()) {
-      if (processDeadRegion(e.getKey(), e.getValue(),
-          this.services.getAssignmentManager(),
-          this.server.getCatalogTracker())) {
-        this.services.getAssignmentManager().assign(e.getKey(), true);
+      // Iterate regions that were on this server and assign them
+      if (hris != null) {
+        for (Map.Entry<HRegionInfo, Result> e: hris.entrySet()) {
+          if (processDeadRegion(e.getKey(), e.getValue(),
+              this.services.getAssignmentManager(),
+              this.server.getCatalogTracker())) {
+            this.services.getAssignmentManager().assign(e.getKey(), true);
+          }
+        }
       }
+    } finally {
+      this.deadServers.finish(serverName);
     }
-    this.deadServers.finish(serverName);
     LOG.info("Finished processing of shutdown of " + serverName);
   }
 
@@ -217,7 +305,7 @@ public class ServerShutdownHandler extends EventHandler {
   throws IOException {
     // If table is not disabled but the region is offlined,
     boolean disabled = assignmentManager.getZKTable().isDisabledTable(
-        hri.getTableDesc().getNameAsString());
+        hri.getTableNameAsString());
     if (disabled) return false;
     if (hri.isOffline() && hri.isSplit()) {
       LOG.debug("Offlined and split region " + hri.getRegionNameAsString() +
@@ -236,11 +324,12 @@ public class ServerShutdownHandler extends EventHandler {
    */
   static void fixupDaughters(final Result result,
       final AssignmentManager assignmentManager,
-      final CatalogTracker catalogTracker) throws IOException {
+      final CatalogTracker catalogTracker)
+  throws IOException {
     fixupDaughter(result, HConstants.SPLITA_QUALIFIER, assignmentManager,
-        catalogTracker);
+      catalogTracker);
     fixupDaughter(result, HConstants.SPLITB_QUALIFIER, assignmentManager,
-        catalogTracker);
+      catalogTracker);
   }
 
   /**
@@ -258,6 +347,11 @@ public class ServerShutdownHandler extends EventHandler {
     if (isDaughterMissing(catalogTracker, daughter)) {
       LOG.info("Fixup; missing daughter " + daughter.getRegionNameAsString());
       MetaEditor.addDaughter(catalogTracker, daughter, null);
+
+      // TODO: Log WARN if the regiondir does not exist in the fs.  If its not
+      // there then something wonky about the split -- things will keep going
+      // but could be missing references to parent region.
+
       // And assign it.
       assignmentManager.assign(daughter, true);
     } else {
@@ -281,8 +375,8 @@ public class ServerShutdownHandler extends EventHandler {
   }
 
   /**
-   * Look for presence of the daughter OR of a split of the daughter. Daughter
-   * could have been split over on regionserver before a run of the
+   * Look for presence of the daughter OR of a split of the daughter in .META.
+   * Daughter could have been split over on regionserver before a run of the
    * catalogJanitor had chance to clear reference from parent.
    * @param daughter Daughter region to search for.
    * @throws IOException 
@@ -327,9 +421,14 @@ public class ServerShutdownHandler extends EventHandler {
         LOG.warn("No serialized HRegionInfo in " + r);
         return true;
       }
+      byte [] value = r.getValue(HConstants.CATALOG_FAMILY,
+          HConstants.SERVER_QUALIFIER);
+      // See if daughter is assigned to some server
+      if (value == null) return false;
+
       // Now see if we have gone beyond the daughter's startrow.
-      if (!Bytes.equals(daughter.getTableDesc().getName(),
-          hri.getTableDesc().getName())) {
+      if (!Bytes.equals(daughter.getTableName(),
+          hri.getTableName())) {
         // We fell into another table.  Stop scanning.
         return false;
       }

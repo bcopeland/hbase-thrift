@@ -58,9 +58,15 @@ public class TestZKTable {
       public void abort(String why, Throwable e) {
         LOG.info(why, e);
       }
+      
+      @Override
+      public boolean isAborted() {
+        return false;
+      }
+      
     };
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(TEST_UTIL.getConfiguration(),
-      name, abortable);
+      name, abortable, true);
     ZKTable zkt = new ZKTable(zkw);
     assertTrue(zkt.isEnabledTable(name));
     assertFalse(zkt.isDisablingTable(name));

@@ -20,6 +20,7 @@
 
 package org.apache.hadoop.hbase.regionserver;
 
+import org.apache.commons.lang.NotImplementedException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.KeyValue;
@@ -35,7 +36,8 @@ import java.util.NavigableSet;
  * Scanner scans both the memstore and the HStore. Coalesce KeyValue stream
  * into List<KeyValue> for a single row.
  */
-class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersObserver {
+class StoreScanner extends NonLazyKeyValueScanner
+    implements KeyValueScanner, InternalScanner, ChangedReadersObserver {
   static final Log LOG = LogFactory.getLog(StoreScanner.class);
   private Store store;
   private ScanQueryMatcher matcher;
@@ -46,9 +48,34 @@ class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersOb
   // Doesnt need to be volatile because it's always accessed via synchronized methods
   private boolean closing = false;
   private final boolean isGet;
+  private final boolean explicitColumnQuery;
+  private final boolean useRowColBloom;
+
+  /** We don't ever expect to change this, the constant is just for clarity. */
+  static final boolean LAZY_SEEK_ENABLED_BY_DEFAULT = true;
+
+  /** Used during unit testing to ensure that lazy seek does save seek ops */
+  private static boolean lazySeekEnabledGlobally =
+      LAZY_SEEK_ENABLED_BY_DEFAULT;
 
   // if heap == null and lastTop != null, you need to reseek given the key below
   private KeyValue lastTop = null;
+
+  /** An internal constructor. */
+  private StoreScanner(Store store, boolean cacheBlocks, Scan scan,
+      final NavigableSet<byte[]> columns){
+    this.store = store;
+    this.cacheBlocks = cacheBlocks;
+    isGet = scan.isGetScan();
+    int numCol = columns == null ? 0 : columns.size();
+    explicitColumnQuery = numCol > 0;
+
+    // We look up row-column Bloom filters for multi-column queries as part of
+    // the seek operation. However, we also look the row-column Bloom filter
+    // for multi-row (non-"get") scans because this is not done in
+    // StoreFile.passesBloomFilter(Scan, SortedSet<byte[]>).
+    useRowColBloom = numCol > 1 || (!isGet && numCol == 1);
+  }
 
   /**
    * Opens a scanner across memstore, snapshot, and all StoreFiles.
@@ -60,21 +87,25 @@ class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersOb
    */
   StoreScanner(Store store, Scan scan, final NavigableSet<byte[]> columns)
                               throws IOException {
-    this.store = store;
-    this.cacheBlocks = scan.getCacheBlocks();
+    this(store, scan.getCacheBlocks(), scan, columns);
     matcher = new ScanQueryMatcher(scan, store.getFamily().getName(),
         columns, store.ttl, store.comparator.getRawComparator(),
-        store.versionsToReturn(scan.getMaxVersions()), 
+        store.minVersions, store.versionsToReturn(scan.getMaxVersions()),
         false);
 
-    this.isGet = scan.isGetScan();
-    // pass columns = try to filter out unnecessary ScanFiles
+    // Pass columns to try to filter out unnecessary StoreFiles.
     List<KeyValueScanner> scanners = getScanners(scan, columns);
 
-    // Seek all scanners to the start of the Row (or if the exact maching row key does not
-    // exist, then to the start of the next matching Row).
-    for(KeyValueScanner scanner : scanners) {
-      scanner.seek(matcher.getStartKey());
+    // Seek all scanners to the start of the Row (or if the exact matching row
+    // key does not exist, then to the start of the next matching Row).
+    if (explicitColumnQuery && lazySeekEnabledGlobally) {
+      for (KeyValueScanner scanner : scanners) {
+        scanner.requestSeek(matcher.getStartKey(), false, useRowColBloom);
+      }
+    } else {
+      for (KeyValueScanner scanner : scanners) {
+        scanner.seek(matcher.getStartKey());
+      }
     }
 
     // Combine all seeked scanners with a heap
@@ -92,13 +123,10 @@ class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersOb
    * @param scanners ancilliary scanners
    */
   StoreScanner(Store store, Scan scan, List<? extends KeyValueScanner> scanners,
-      boolean retainDeletesInOutput)
-  throws IOException {
-    this.store = store;
-    this.cacheBlocks = false;
-    this.isGet = false;
+      boolean retainDeletesInOutput) throws IOException {
+    this(store, false, scan, null);
     matcher = new ScanQueryMatcher(scan, store.getFamily().getName(),
-        null, store.ttl, store.comparator.getRawComparator(),
+        null, store.ttl, store.comparator.getRawComparator(), store.minVersions,
         store.versionsToReturn(scan.getMaxVersions()), retainDeletesInOutput);
 
     // Seek all scanners to the initial key
@@ -116,11 +144,9 @@ class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersOb
       final NavigableSet<byte[]> columns,
       final List<KeyValueScanner> scanners)
         throws IOException {
-    this.store = null;
-    this.isGet = false;
-    this.cacheBlocks = scan.getCacheBlocks();
+    this(null, scan.getCacheBlocks(), scan, columns);
     this.matcher = new ScanQueryMatcher(scan, colFamily, columns, ttl,
-        comparator.getRawComparator(), scan.getMaxVersions(), false);
+        comparator.getRawComparator(), 0, scan.getMaxVersions(), false);
 
     // Seek all scanners to the initial key
     for(KeyValueScanner scanner : scanners) {
@@ -226,7 +252,6 @@ class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersOb
    * @return true if there are more rows, false if scanner is done
    */
   public synchronized boolean next(List<KeyValue> outResult, int limit) throws IOException {
-    //DebugPrint.println("SS.next");
 
     checkReseek();
 
@@ -250,16 +275,43 @@ class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersOb
     }
 
     KeyValue kv;
+    KeyValue prevKV = null;
     List<KeyValue> results = new ArrayList<KeyValue>();
+
+    // Only do a sanity-check if store and comparator are available.
+    KeyValue.KVComparator comparator =
+        store != null ? store.getComparator() : null;
+
     LOOP: while((kv = this.heap.peek()) != null) {
       // kv is no longer immutable due to KeyOnlyFilter! use copy for safety
       KeyValue copyKv = kv.shallowCopy();
+      // Check that the heap gives us KVs in an increasing order.
+      if (prevKV != null && comparator != null
+          && comparator.compare(prevKV, kv) > 0) {
+        throw new IOException("Key " + prevKV + " followed by a " +
+            "smaller key " + kv + " in cf " + store);
+      }
+      prevKV = copyKv;
       ScanQueryMatcher.MatchCode qcode = matcher.match(copyKv);
-      //DebugPrint.println("SS peek kv = " + kv + " with qcode = " + qcode);
       switch(qcode) {
         case INCLUDE:
+        case INCLUDE_AND_SEEK_NEXT_ROW:
+        case INCLUDE_AND_SEEK_NEXT_COL:
+
           results.add(copyKv);
-          this.heap.next();
+
+          if (qcode == ScanQueryMatcher.MatchCode.INCLUDE_AND_SEEK_NEXT_ROW) {
+            if (!matcher.moreRowsMayExistAfter(kv)) {
+              outResult.addAll(results);
+              return false;
+            }
+            reseek(matcher.getKeyForNextRow(kv));
+          } else if (qcode == ScanQueryMatcher.MatchCode.INCLUDE_AND_SEEK_NEXT_COL) {
+            reseek(matcher.getKeyForNextColumn(kv));
+          } else {
+            this.heap.next();
+          }
+
           if (limit > 0 && (results.size() == limit)) {
             break LOOP;
           }
@@ -279,8 +331,8 @@ class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersOb
           return false;
 
         case SEEK_NEXT_ROW:
-          // This is just a relatively simple end of scan fix, to short-cut end us if there is a
-          // endKey in the scan.
+          // This is just a relatively simple end of scan fix, to short-cut end
+          // us if there is an endKey in the scan.
           if (!matcher.moreRowsMayExistAfter(kv)) {
             outResult.addAll(results);
             return false;
@@ -391,11 +443,35 @@ class StoreScanner implements KeyValueScanner, InternalScanner, ChangedReadersOb
   public synchronized boolean reseek(KeyValue kv) throws IOException {
     //Heap cannot be null, because this is only called from next() which
     //guarantees that heap will never be null before this call.
-    return this.heap.reseek(kv);
+    if (explicitColumnQuery && lazySeekEnabledGlobally) {
+      return heap.requestSeek(kv, true, useRowColBloom);
+    } else {
+      return heap.reseek(kv);
+    }
   }
 
   @Override
   public long getSequenceID() {
     return 0;
   }
+
+  /**
+   * Used in testing.
+   * @return all scanners in no particular order
+   */
+  List<KeyValueScanner> getAllScannersForTesting() {
+    List<KeyValueScanner> allScanners = new ArrayList<KeyValueScanner>();
+    KeyValueScanner current = heap.getCurrentForTesting();
+    if (current != null)
+      allScanners.add(current);
+    for (KeyValueScanner scanner : heap.getHeap())
+      allScanners.add(scanner);
+    return allScanners;
+  }
+
+  static void enableLazySeekGlobally(boolean enable) {
+    lazySeekEnabledGlobally = enable;
+  }
+
 }
+

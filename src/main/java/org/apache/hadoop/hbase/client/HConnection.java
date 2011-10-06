@@ -68,6 +68,8 @@ public interface HConnection extends Abortable, Closeable {
    * Retrieve ZooKeeperWatcher used by this connection.
    * @return ZooKeeperWatcher handle being used by the connection.
    * @throws IOException if a remote or network exception occurs
+   * @deprecated Removed because it was a mistake exposing zookeeper in this
+   * interface (ZooKeeper is an implementation detail).
    */
   public ZooKeeperWatcher getZooKeeperWatcher() throws IOException;
 
@@ -373,4 +375,13 @@ public interface HConnection extends Abortable, Closeable {
    * @deprecated This method will be changed from public to package protected.
    */
   public int getCurrentNrHRS() throws IOException;
+
+  /**
+   * @param tableNames List of table names
+   * @return HTD[] table metadata
+   * @throws IOException if a remote or network exception occurs
+   */
+  public HTableDescriptor[] getHTableDescriptors(List<String> tableNames)
+  throws IOException;
+
 }

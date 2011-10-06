@@ -42,6 +42,7 @@ import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.fs.FilterFileSystem;
 import org.apache.hadoop.fs.LocalFileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
@@ -56,8 +57,8 @@ import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManagerTestHelper;
-import org.apache.hadoop.hbase.util.IncrementingEnvironmentEdge;
 import org.apache.hadoop.hbase.util.ManualEnvironmentEdge;
+import org.apache.hadoop.util.Progressable;
 import org.mockito.Mockito;
 
 import com.google.common.base.Joiner;
@@ -121,15 +122,18 @@ public class TestStore extends TestCase {
     Path logdir = new Path(DIR+methodName+"/logs");
     Path oldLogDir = new Path(basedir, HConstants.HREGION_OLDLOGDIR_NAME);
     HColumnDescriptor hcd = new HColumnDescriptor(family);
+    // some of the tests write 4 versions and then flush
+    // (with HBASE-4241, lower versions are collected on flush)
+    hcd.setMaxVersions(4);
     FileSystem fs = FileSystem.get(conf);
 
     fs.delete(logdir, true);
 
     HTableDescriptor htd = new HTableDescriptor(table);
     htd.addFamily(hcd);
-    HRegionInfo info = new HRegionInfo(htd, null, null, false);
+    HRegionInfo info = new HRegionInfo(htd.getName(), null, null, false);
     HLog hlog = new HLog(fs, logdir, oldLogDir, conf);
-    HRegion region = new HRegion(basedir, hlog, fs, conf, info, null);
+    HRegion region = new HRegion(basedir, hlog, fs, conf, info, htd, null);
 
     store = new Store(basedir, region, hcd, fs, conf);
   }
@@ -205,7 +209,7 @@ public class TestStore extends TestCase {
     Configuration c = HBaseConfiguration.create();
     FileSystem fs = FileSystem.get(c);
     StoreFile.Writer w = StoreFile.createWriter(fs, storedir,
-        StoreFile.DEFAULT_BLOCKSIZE_SMALL);
+        StoreFile.DEFAULT_BLOCKSIZE_SMALL, c);
     w.appendMetadata(seqid + 1, false);
     w.close();
     this.store.close();
@@ -572,6 +576,14 @@ public class TestStore extends TestCase {
       return new FaultyOutputStream(super.create(p), faultPos);
     }
 
+    @Override
+    public FSDataOutputStream create(Path f, FsPermission permission,
+        boolean overwrite, int bufferSize, short replication, long blockSize,
+        Progressable progress) throws IOException {
+      return new FaultyOutputStream(super.create(f, permission,
+          overwrite, bufferSize, replication, blockSize, progress), faultPos);
+    }    
+
   }
 
   static class FaultyOutputStream extends FSDataOutputStream {
@@ -688,9 +700,9 @@ public class TestStore extends TestCase {
    */
   public void testSplitWithEmptyColFam() throws IOException {
     init(this.getName());
-    assertNull(store.checkSplit());
+    assertNull(store.getSplitPoint());
     store.getHRegion().forceSplit(null);
-    assertNull(store.checkSplit());
+    assertNull(store.getSplitPoint());
     store.getHRegion().clearSplit_TESTS_ONLY();
   }
 }

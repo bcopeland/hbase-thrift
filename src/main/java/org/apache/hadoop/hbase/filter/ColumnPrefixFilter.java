@@ -26,10 +26,13 @@ import org.apache.hadoop.hbase.util.Bytes;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.DataInput;
+import java.util.ArrayList;
+
+import com.google.common.base.Preconditions;
 
 /**
  * This filter is used for selecting only those keys with columns that matches
- * a particular prefix. For example, if prefix is 'an', it will pass keys will
+ * a particular prefix. For example, if prefix is 'an', it will pass keys with
  * columns like 'and', 'anti' but not keys with columns like 'ball', 'act'.
  */
 public class ColumnPrefixFilter extends FilterBase {
@@ -76,6 +79,13 @@ public class ColumnPrefixFilter extends FilterBase {
         return ReturnCode.INCLUDE;
       }
     }
+  }
+
+  public static Filter createFilterFromArguments(ArrayList<byte []> filterArguments) {
+    Preconditions.checkArgument(filterArguments.size() == 1,
+                                "Expected 1 but got: %s", filterArguments.size());
+    byte [] columnPrefix = ParseFilter.removeQuotesFromByteArray(filterArguments.get(0));
+    return new ColumnPrefixFilter(columnPrefix);
   }
 
   public void write(DataOutput out) throws IOException {

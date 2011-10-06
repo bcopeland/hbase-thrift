@@ -26,6 +26,9 @@ import org.apache.hadoop.hbase.util.Bytes;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.DataInput;
+import java.util.ArrayList;
+
+import com.google.common.base.Preconditions;
 
 /**
  * This filter is used for selecting only those keys with columns that are
@@ -88,10 +91,24 @@ public class ColumnRangeFilter extends FilterBase {
   }
 
   /**
+   * @return true if min column is inclusive, false otherwise
+   */
+  public boolean getMinColumnInclusive() {
+    return this.minColumnInclusive;
+  }
+
+  /**
    * @return the max column range for the filter
    */
   public byte[] getMaxColumn() {
     return this.maxColumn;
+  }
+
+  /**
+   * @return true if max column is inclusive, false otherwise
+   */
+  public boolean getMaxColumnInclusive() {
+    return this.maxColumnInclusive;
   }
 
   @Override
@@ -127,6 +144,22 @@ public class ColumnRangeFilter extends FilterBase {
     }
 
     return ReturnCode.NEXT_ROW;
+  }
+
+  public static Filter createFilterFromArguments(ArrayList<byte []> filterArguments) {
+    Preconditions.checkArgument(filterArguments.size() == 4,
+                                "Expected 4 but got: %s", filterArguments.size());
+    byte [] minColumn = ParseFilter.removeQuotesFromByteArray(filterArguments.get(0));
+    boolean minColumnInclusive = ParseFilter.convertByteArrayToBoolean(filterArguments.get(1));
+    byte [] maxColumn = ParseFilter.removeQuotesFromByteArray(filterArguments.get(2));
+    boolean maxColumnInclusive = ParseFilter.convertByteArrayToBoolean(filterArguments.get(3));
+
+    if (minColumn.length == 0)
+      minColumn = null;
+    if (maxColumn.length == 0)
+      maxColumn = null;
+    return new ColumnRangeFilter(minColumn, minColumnInclusive,
+                                 maxColumn, maxColumnInclusive);
   }
 
   @Override

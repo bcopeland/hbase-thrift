@@ -22,11 +22,11 @@ package org.apache.hadoop.hbase.ipc;
 
 import com.google.common.base.Function;
 import org.apache.hadoop.io.Writable;
-import org.apache.hadoop.ipc.VersionedProtocol;
+import org.apache.hadoop.hbase.ipc.VersionedProtocol;
+import org.apache.hadoop.hbase.monitoring.MonitoredRPCHandler;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
 
 /**
  */
@@ -49,7 +49,7 @@ public interface RpcServer {
    * @throws java.io.IOException e
    */
   Writable call(Class<? extends VersionedProtocol> protocol,
-      Writable param, long receiveTime)
+      Writable param, long receiveTime, MonitoredRPCHandler status)
       throws IOException;
 
   int getNumOpenConnections();
@@ -63,6 +63,13 @@ public interface RpcServer {
   void openServer();
 
   void startThreads();
+
+  /**
+   * Needed for delayed calls.  We need to be able to store the current call
+   * so that we can complete it later.
+   * @return Call the server is currently handling.
+   */
+  Delayable getCurrentCall();
 
   /**
    * Returns the metrics instance for reporting RPC call statistics

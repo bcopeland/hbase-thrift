@@ -22,6 +22,12 @@ package org.apache.hadoop.hbase;
 import org.apache.hadoop.hbase.ipc.HRegionInterface;
 import org.apache.hadoop.hbase.util.Bytes;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+import java.util.regex.Pattern;
+
 /**
  * HConstants holds a bunch of HBase-related constants
  */
@@ -142,7 +148,7 @@ public final class HConstants {
 
   /** Default value for thread wake frequency */
   public static final int DEFAULT_THREAD_WAKE_FREQUENCY = 10 * 1000;
-  
+
   /** Parameter name for how often a region should should perform a major compaction */
   public static final String MAJOR_COMPACTION_PERIOD = "hbase.hregion.majorcompaction";
 
@@ -165,11 +171,23 @@ public final class HConstants {
    * Use '.' as a special character to seperate the log files from table data */
   public static final String HREGION_LOGDIR_NAME = ".logs";
 
+  /** Used to construct the name of the splitlog directory for a region server */
+  public static final String SPLIT_LOGDIR_NAME = "splitlog";
+
+  public static final String CORRUPT_DIR_NAME = ".corrupt";
+
   /** Like the previous, but for old logs that are about to be deleted */
   public static final String HREGION_OLDLOGDIR_NAME = ".oldlogs";
 
   /** Used to construct the name of the compaction directory during compaction */
   public static final String HREGION_COMPACTIONDIR_NAME = "compaction.dir";
+
+  /** The file name used to store HTD in HDFS  */
+  public static final String TABLEINFO_NAME = ".tableinfo";
+
+  /** The metaupdated column qualifier */
+  public static final byte [] META_MIGRATION_QUALIFIER = Bytes.toBytes("metamigrated");
+
 
   /** Default maximum file size */
   public static final long DEFAULT_MAX_FILE_SIZE = 256 * 1024 * 1024;
@@ -347,7 +365,7 @@ public final class HConstants {
    * Default cluster ID, cannot be used to identify a cluster so a key with
    * this value means it wasn't meant for replication.
    */
-  public static final byte DEFAULT_CLUSTER_ID = 0;
+  public static final UUID DEFAULT_CLUSTER_ID = new UUID(0L,0L);
 
     /**
      * Parameter name for maximum number of bytes returned when calling a
@@ -449,14 +467,23 @@ public final class HConstants {
    * timeout for each RPC
    */
   public static String HBASE_RPC_TIMEOUT_KEY = "hbase.rpc.timeout";
-  
+
   /**
    * Default value of {@link #HBASE_RPC_TIMEOUT_KEY}
    */
   public static int DEFAULT_HBASE_RPC_TIMEOUT = 60000;
 
+  /*
+   * cluster replication constants.
+   */
   public static final String
       REPLICATION_ENABLE_KEY = "hbase.replication";
+  public static final String 
+      REPLICATION_SOURCE_SERVICE_CLASSNAME = "hbase.replication.source.service";
+  public static final String 
+      REPLICATION_SINK_SERVICE_CLASSNAME = "hbase.replication.sink.service";
+  public static final String REPLICATION_SERVICE_CLASSNAME_DEFAULT =
+    "org.apache.hadoop.hbase.replication.regionserver.Replication";
 
   /** HBCK special code name used as server name when manipulating ZK nodes */
   public static final String HBCK_CODE_NAME = "HBCKServerName";
@@ -470,10 +497,29 @@ public final class HConstants {
   public static final String HBASE_MASTER_LOGCLEANER_PLUGINS =
       "hbase.master.logcleaner.plugins";
 
-   /*
+  public static final String HBASE_REGION_SPLIT_POLICY_KEY =
+    "hbase.regionserver.region.split.policy";
+
+  /*
     * Minimum percentage of free heap necessary for a successful cluster startup.
     */
   public static final float HBASE_CLUSTER_MINIMUM_MEMORY_THRESHOLD = 0.2f;
+
+  public static final List<String> HBASE_NON_USER_TABLE_DIRS = new ArrayList<String>(
+      Arrays.asList(new String[]{ HREGION_LOGDIR_NAME, HREGION_OLDLOGDIR_NAME,
+          CORRUPT_DIR_NAME, Bytes.toString(META_TABLE_NAME),
+          Bytes.toString(ROOT_TABLE_NAME), SPLIT_LOGDIR_NAME }));
+
+  public static final Pattern CP_HTD_ATTR_KEY_PATTERN = Pattern.compile
+      ("coprocessor\\$([0-9]+)", Pattern.CASE_INSENSITIVE);
+  public static final Pattern CP_HTD_ATTR_VALUE_PATTERN =
+      Pattern.compile("([^\\|]*)\\|([^\\|]+)\\|[\\s]*([\\d]*)[\\s]*(\\|.*)?");
+
+  public static final String CP_HTD_ATTR_VALUE_PARAM_KEY_PATTERN = "[^=,]+";
+  public static final String CP_HTD_ATTR_VALUE_PARAM_VALUE_PATTERN = "[^,]+";
+  public static final Pattern CP_HTD_ATTR_VALUE_PARAM_PATTERN = Pattern.compile(
+      "(" + CP_HTD_ATTR_VALUE_PARAM_KEY_PATTERN + ")=(" +
+      CP_HTD_ATTR_VALUE_PARAM_VALUE_PATTERN + "),?");
 
   private HConstants() {
     // Can't be instantiated with this ctor.

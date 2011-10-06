@@ -35,7 +35,6 @@ import java.util.NoSuchElementException;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -195,11 +194,25 @@ public class HConnectionManager {
    * @param stopProxy
    *          Shuts down all the proxy's put up to cluster members including to
    *          cluster HMaster. Calls
-   *          {@link HBaseRPC#stopProxy(org.apache.hadoop.ipc.VersionedProtocol)}
+   *          {@link HBaseRPC#stopProxy(org.apache.hadoop.hbase.ipc.VersionedProtocol)}
    *          .
    */
   public static void deleteConnection(Configuration conf, boolean stopProxy) {
-    deleteConnection(new HConnectionKey(conf), stopProxy);
+    deleteConnection(new HConnectionKey(conf), stopProxy, false);
+  }
+
+  /**
+   * Delete stale connection information for the instance specified by configuration.
+   * This will then close connection to
+   * the zookeeper ensemble and let go of all resources.
+   *
+   * @param conf
+   *          configuration whose identity is used to find {@link HConnection}
+   *          instance.
+   *          .
+   */
+  public static void deleteStaleConnection(HConnection connection) {
+    deleteConnection(connection, true, true);
   }
 
   /**
@@ -212,31 +225,33 @@ public class HConnectionManager {
       Set<HConnectionKey> connectionKeys = new HashSet<HConnectionKey>();
       connectionKeys.addAll(HBASE_INSTANCES.keySet());
       for (HConnectionKey connectionKey : connectionKeys) {
-        deleteConnection(connectionKey, stopProxy);
+        deleteConnection(connectionKey, stopProxy, false);
       }
       HBASE_INSTANCES.clear();
     }
   }
 
-  private static void deleteConnection(HConnection connection, boolean stopProxy) {
+  private static void deleteConnection(HConnection connection, boolean stopProxy,
+      boolean staleConnection) {
     synchronized (HBASE_INSTANCES) {
       for (Entry<HConnectionKey, HConnectionImplementation> connectionEntry : HBASE_INSTANCES
           .entrySet()) {
         if (connectionEntry.getValue() == connection) {
-          deleteConnection(connectionEntry.getKey(), stopProxy);
+          deleteConnection(connectionEntry.getKey(), stopProxy, staleConnection);
           break;
         }
       }
     }
   }
 
-  private static void deleteConnection(HConnectionKey connectionKey, boolean stopProxy) {
+  private static void deleteConnection(HConnectionKey connectionKey,
+      boolean stopProxy, boolean staleConnection) {
     synchronized (HBASE_INSTANCES) {
       HConnectionImplementation connection = HBASE_INSTANCES
           .get(connectionKey);
       if (connection != null) {
         connection.decCount();
-        if (connection.isZeroReference()) {
+        if (connection.isZeroReference() || staleConnection) {
           HBASE_INSTANCES.remove(connectionKey);
           connection.close(stopProxy);
         } else if (stopProxy) {
@@ -431,6 +446,7 @@ public class HConnectionManager {
 
     private final Object masterLock = new Object();
     private volatile boolean closed;
+    private volatile boolean aborted;
     private volatile HMasterInterface master;
     private volatile boolean masterChecked;
     // ZooKeeper reference
@@ -554,7 +570,7 @@ public class HConnectionManager {
           return master;
         }
       }
-
+      checkIfBaseNodeAvailable();
       ServerName sn = null;
       synchronized (this.masterLock) {
         for (int tries = 0;
@@ -616,6 +632,15 @@ public class HConnectionManager {
       return this.master;
     }
 
+    private void checkIfBaseNodeAvailable() throws MasterNotRunningException {
+      if (false == masterAddressTracker.checkIfBaseNodeAvailable()) {
+        String errorMsg = "Check the value configured in 'zookeeper.znode.parent'. "
+            + "There could be a mismatch with the one configured in the master.";
+        LOG.error(errorMsg);
+        throw new MasterNotRunningException(errorMsg);
+      }
+    }
+    
     public boolean isMasterRunning()
     throws MasterNotRunningException, ZooKeeperConnectionException {
       if (this.master == null) {
@@ -632,33 +657,6 @@ public class HConnectionManager {
         final byte [] row, boolean reload)
     throws IOException {
       return reload? relocateRegion(name, row): locateRegion(name, row);
-    }
-
-    public HTableDescriptor[] listTables() throws IOException {
-      final TreeSet<HTableDescriptor> uniqueTables =
-        new TreeSet<HTableDescriptor>();
-      MetaScannerVisitor visitor = new MetaScannerVisitor() {
-        public boolean processRow(Result result) throws IOException {
-          try {
-            byte[] value = result.getValue(HConstants.CATALOG_FAMILY,
-                HConstants.REGIONINFO_QUALIFIER);
-            HRegionInfo info = null;
-            if (value != null) {
-              info = Writables.getHRegionInfo(value);
-            }
-            // Only examine the rows where the startKey is zero length
-            if (info != null && info.getStartKey().length == 0) {
-              uniqueTables.add(info.getTableDesc());
-            }
-            return true;
-          } catch (RuntimeException e) {
-            LOG.error("Result=" + result);
-            throw e;
-          }
-        }
-      };
-      MetaScanner.metaScan(conf, visitor);
-      return uniqueTables.toArray(new HTableDescriptor[uniqueTables.size()]);
     }
 
     public boolean isTableEnabled(byte[] tableName) throws IOException {
@@ -679,7 +677,7 @@ public class HConnectionManager {
               HConstants.REGIONINFO_QUALIFIER);
           HRegionInfo info = Writables.getHRegionInfoOrNull(value);
           if (info != null) {
-            if (Bytes.equals(tableName, info.getTableDesc().getName())) {
+            if (Bytes.equals(tableName, info.getTableName())) {
               value = row.getValue(HConstants.CATALOG_FAMILY,
                   HConstants.SERVER_QUALIFIER);
               if (value == null) {
@@ -714,47 +712,6 @@ public class HConnectionManager {
       } catch (KeeperException e) {
         throw new IOException("Enable/Disable failed", e);
       }
-    }
-
-    private static class HTableDescriptorFinder
-    implements MetaScanner.MetaScannerVisitor {
-        byte[] tableName;
-        HTableDescriptor result;
-        protected HTableDescriptorFinder(byte[] tableName) {
-          this.tableName = tableName;
-        }
-        public boolean processRow(Result rowResult) throws IOException {
-          HRegionInfo info = Writables.getHRegionInfoOrNull(
-              rowResult.getValue(HConstants.CATALOG_FAMILY,
-                  HConstants.REGIONINFO_QUALIFIER));
-          if (info == null) return true;
-          HTableDescriptor desc = info.getTableDesc();
-          if (Bytes.compareTo(desc.getName(), tableName) == 0) {
-            result = desc;
-            return false;
-          }
-          return true;
-        }
-        HTableDescriptor getResult() {
-          return result;
-        }
-    }
-
-    public HTableDescriptor getHTableDescriptor(final byte[] tableName)
-    throws IOException {
-      if (Bytes.equals(tableName, HConstants.ROOT_TABLE_NAME)) {
-        return new UnmodifyableHTableDescriptor(HTableDescriptor.ROOT_TABLEDESC);
-      }
-      if (Bytes.equals(tableName, HConstants.META_TABLE_NAME)) {
-        return HTableDescriptor.META_TABLEDESC;
-      }
-      HTableDescriptorFinder finder = new HTableDescriptorFinder(tableName);
-      MetaScanner.metaScan(conf, finder, tableName);
-      HTableDescriptor result = finder.getResult();
-      if (result == null) {
-        throw new TableNotFoundException(Bytes.toString(tableName));
-      }
-      return result;
     }
 
     @Override
@@ -836,7 +793,7 @@ public class HConnectionManager {
               regionInfo = Writables.getHRegionInfo(value);
 
               // possible we got a region of a different table...
-              if (!Bytes.equals(regionInfo.getTableDesc().getName(),
+              if (!Bytes.equals(regionInfo.getTableName(),
                   tableName)) {
                 return false; // stop scanning
               }
@@ -956,12 +913,20 @@ public class HConnectionManager {
           HRegionInfo regionInfo = (HRegionInfo) Writables.getWritable(
               value, new HRegionInfo());
           // possible we got a region of a different table...
-          if (!Bytes.equals(regionInfo.getTableDesc().getName(), tableName)) {
+          if (!Bytes.equals(regionInfo.getTableName(), tableName)) {
             throw new TableNotFoundException(
-              "Table '" + Bytes.toString(tableName) + "' was not found.");
+                  "Table '" + Bytes.toString(tableName) + "' was not found, got: " +
+                  Bytes.toString(regionInfo.getTableName()) + ".");
+          }
+          if (regionInfo.isSplit()) {
+            throw new RegionOfflineException("the only available region for" +
+              " the required row is a split parent," +
+              " the daughters should be online soon: " +
+              regionInfo.getRegionNameAsString());
           }
           if (regionInfo.isOffline()) {
-            throw new RegionOfflineException("region offline: " +
+            throw new RegionOfflineException("the region is offline, could" +
+              " be caused by a disable table call: " +
               regionInfo.getRegionNameAsString());
           }
 
@@ -980,8 +945,6 @@ public class HConnectionManager {
           // Instantiate the location
           String hostname = Addressing.parseHostname(hostAndPort);
           int port = Addressing.parsePort(hostAndPort);
-          value = regionInfoRow.getValue(HConstants.CATALOG_FAMILY,
-            HConstants.SERVER_QUALIFIER);
           location = new HRegionLocation(regionInfo, hostname, port);
           cacheLocation(tableName, location);
           return location;
@@ -1160,7 +1123,7 @@ public class HConnectionManager {
       if (tableLocations.put(startKey, location) == null) {
         LOG.debug("Cached location for " +
             location.getRegionInfo().getRegionNameAsString() +
-            " is " + location.getServerAddress());
+            " is " + location.getHostnamePort());
       }
     }
 
@@ -1204,8 +1167,13 @@ public class HConnectionManager {
     throws IOException {
       if (master) getMaster();
       HRegionInterface server;
-      String rsName = isa != null?
-          isa.toString(): Addressing.createHostAndPortStr(hostname, port);
+      String rsName = null;
+      if (isa != null) {
+        rsName = Addressing.createHostAndPortStr(isa.getHostName(),
+            isa.getPort());
+      } else {
+        rsName = Addressing.createHostAndPortStr(hostname, port);
+      }
       // See if we already have a connection (common case)
       server = this.servers.get(rsName);
       if (server == null) {
@@ -1228,7 +1196,8 @@ public class HConnectionManager {
                   serverInterfaceClass, HRegionInterface.VERSION,
                   address, this.conf,
                   this.maxRPCAttempts, this.rpcTimeout, this.rpcTimeout);
-              this.servers.put(address.toString(), server);
+              this.servers.put(Addressing.createHostAndPortStr(
+                  address.getHostName(), address.getPort()), server);
             } catch (RemoteException e) {
               LOG.warn("RemoteException connecting to RS", e);
               // Throw what the RemoteException was carrying.
@@ -1467,7 +1436,7 @@ public class HConnectionManager {
               actionsByServer.put(loc, actions);
             }
 
-            Action<R> action = new Action<R>(regionName, row, i);
+            Action<R> action = new Action<R>(row, i);
             lastServers[i] = loc;
             actions.add(regionName, action);
           }
@@ -1692,7 +1661,13 @@ public class HConnectionManager {
       }
       if (t != null) LOG.fatal(msg, t);
       else LOG.fatal(msg);
+      this.aborted = true;
       this.closed = true;
+    }
+    
+    @Override
+    public boolean isAborted(){
+      return this.aborted;
     }
 
     public int getCurrentNrHRS() throws IOException {
@@ -1753,8 +1728,8 @@ public class HConnectionManager {
       }
       this.servers.clear();
       if (this.zooKeeper != null) {
-        LOG.info("Closed zookeeper sessionid=0x"
-            + Long.toHexString(this.zooKeeper.getZooKeeper().getSessionId()));
+        LOG.info("Closed zookeeper sessionid=0x" +
+          Long.toHexString(this.zooKeeper.getRecoverableZooKeeper().getSessionId()));
         this.zooKeeper.close();
         this.zooKeeper = null;
       }
@@ -1762,7 +1737,7 @@ public class HConnectionManager {
     }
 
     public void close() {
-      HConnectionManager.deleteConnection(this, stopProxy);
+      HConnectionManager.deleteConnection((HConnection)this, stopProxy, false);
       LOG.debug("The connection to " + this.zooKeeper + " has been closed.");
     }
 
@@ -1785,5 +1760,50 @@ public class HConnectionManager {
       LOG.debug("The connection to " + this.zooKeeper
           + " was closed by the finalize method.");
     }
+
+    public HTableDescriptor[] listTables() throws IOException {
+      if (this.master == null) {
+        this.master = getMaster();
+      }
+      HTableDescriptor[] htd = master.getHTableDescriptors();
+      return htd;
+    }
+
+    public HTableDescriptor[] getHTableDescriptors(List<String> tableNames) throws IOException {
+      if (tableNames == null || tableNames.size() == 0) return null;
+      if (this.master == null) {
+        this.master = getMaster();
+      }
+      return master.getHTableDescriptors(tableNames);
+    }
+
+    public HTableDescriptor getHTableDescriptor(final byte[] tableName)
+    throws IOException {
+      if (tableName == null || tableName.length == 0) return null;
+      if (Bytes.equals(tableName, HConstants.ROOT_TABLE_NAME)) {
+        return new UnmodifyableHTableDescriptor(HTableDescriptor.ROOT_TABLEDESC);
+      }
+      if (Bytes.equals(tableName, HConstants.META_TABLE_NAME)) {
+        return HTableDescriptor.META_TABLEDESC;
+      }
+      if (this.master == null) {
+        this.master = getMaster();
+      }
+      HTableDescriptor hTableDescriptor = null;
+      HTableDescriptor[] htds = master.getHTableDescriptors();
+      if (htds != null && htds.length > 0) {
+        for (HTableDescriptor htd: htds) {
+          if (Bytes.equals(tableName, htd.getName())) {
+            hTableDescriptor = htd;
+          }
+        }
+      }
+      //HTableDescriptor htd = master.getHTableDescriptor(tableName);
+      if (hTableDescriptor == null) {
+        throw new TableNotFoundException(Bytes.toString(tableName));
+      }
+      return hTableDescriptor;
+    }
+
   }
 }

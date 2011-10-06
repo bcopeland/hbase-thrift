@@ -24,7 +24,7 @@ import java.io.IOException;
 import org.apache.hadoop.hbase.HServerLoad;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.io.MapWritable;
-import org.apache.hadoop.ipc.VersionedProtocol;
+import org.apache.hadoop.hbase.ipc.VersionedProtocol;
 
 /**
  * The Master publishes this Interface for RegionServers to register themselves
@@ -61,4 +61,12 @@ public interface HMasterRegionInterface extends VersionedProtocol {
    */
   public void regionServerReport(byte [] sn, HServerLoad hsl)
   throws IOException;
+  
+  /**
+   * Called by a region server to report a fatal error that is causing
+   * it to abort.
+   * @param sn {@link ServerName#getBytes()}
+   * @param errorMessage informative text to expose in the master logs and UI
+   */
+  public void reportRSFatalError(byte [] sn, String errorMessage);
 }

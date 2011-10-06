@@ -38,6 +38,7 @@ import org.apache.hadoop.metrics.util.MetricsIntValue;
 import org.apache.hadoop.metrics.util.MetricsLongValue;
 import org.apache.hadoop.metrics.util.MetricsRegistry;
 import org.apache.hadoop.metrics.util.MetricsTimeVaryingRate;
+import org.apache.hadoop.util.StringUtils;
 
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
@@ -138,11 +139,28 @@ public class RegionServerMetrics implements Updater {
   public final MetricsLongValue writeRequestsCount = new MetricsLongValue("writeRequestsCount", registry);
 
   /**
-   * Sum of all the storefile index sizes in this regionserver in MB
    */
   public final MetricsIntValue storefileIndexSizeMB =
     new MetricsIntValue("storefileIndexSizeMB", registry);
 
+  /** The total size of block index root levels in this regionserver in KB. */
+  public final MetricsIntValue rootIndexSizeKB =
+    new MetricsIntValue("rootIndexSizeKB", registry);
+
+  /** Total size of all block indexes (not necessarily loaded in memory) */
+  public final MetricsIntValue totalStaticIndexSizeKB =
+    new MetricsIntValue("totalStaticIndexSizeKB", registry);
+
+  /** Total size of all Bloom filters (not necessarily loaded in memory) */
+  public final MetricsIntValue totalStaticBloomSizeKB =
+    new MetricsIntValue("totalStaticBloomSizeKB", registry);
+
+  /**
+   * HDFS blocks locality index
+   */
+  public final MetricsIntValue hdfsBlocksLocalityIndex =
+    new MetricsIntValue("hdfsBlocksLocalityIndex", registry);
+  
   /**
    * Sum of all the memstore sizes in this regionserver in MB
    */
@@ -252,6 +270,9 @@ public class RegionServerMetrics implements Updater {
       this.stores.pushMetric(this.metricsRecord);
       this.storefiles.pushMetric(this.metricsRecord);
       this.storefileIndexSizeMB.pushMetric(this.metricsRecord);
+      this.rootIndexSizeKB.pushMetric(this.metricsRecord);
+      this.totalStaticIndexSizeKB.pushMetric(this.metricsRecord);
+      this.totalStaticBloomSizeKB.pushMetric(this.metricsRecord);
       this.memstoreSizeMB.pushMetric(this.metricsRecord);
       this.readRequestsCount.pushMetric(this.metricsRecord);
       this.writeRequestsCount.pushMetric(this.metricsRecord);
@@ -267,6 +288,7 @@ public class RegionServerMetrics implements Updater {
       this.blockCacheEvictedCount.pushMetric(this.metricsRecord);
       this.blockCacheHitRatio.pushMetric(this.metricsRecord);
       this.blockCacheHitCachingRatio.pushMetric(this.metricsRecord);
+      this.hdfsBlocksLocalityIndex.pushMetric(this.metricsRecord);
 
       // Mix in HFile and HLog metrics
       // Be careful. Here is code for MTVR from up in hadoop:
@@ -278,9 +300,9 @@ public class RegionServerMetrics implements Updater {
       // }
       // Means you can't pass a numOps of zero or get a ArithmeticException / by zero.
       int ops = (int)HFile.getReadOps();
-      if (ops != 0) this.fsReadLatency.inc(ops, HFile.getReadTime());
+      if (ops != 0) this.fsReadLatency.inc(ops, HFile.getReadTimeMs());
       ops = (int)HFile.getWriteOps();
-      if (ops != 0) this.fsWriteLatency.inc(ops, HFile.getWriteTime());
+      if (ops != 0) this.fsWriteLatency.inc(ops, HFile.getWriteTimeMs());
       // mix in HLog metrics
       ops = (int)HLog.getWriteOps();
       if (ops != 0) this.fsWriteLatency.inc(ops, HLog.getWriteTime());
@@ -342,21 +364,23 @@ public class RegionServerMetrics implements Updater {
   @Override
   public String toString() {
     StringBuilder sb = new StringBuilder();
-    int seconds = (int)((System.currentTimeMillis() - this.lastUpdate)/1000);
-    if (seconds == 0) {
-      seconds = 1;
-    }
-    sb = Strings.appendKeyValue(sb, "request",
-      Float.valueOf(this.requests.getPreviousIntervalValue()));
-    sb = Strings.appendKeyValue(sb, "regions",
+    sb = Strings.appendKeyValue(sb, "requestsPerSecond", Integer
+        .valueOf((int) this.requests.getPreviousIntervalValue()));
+    sb = Strings.appendKeyValue(sb, "numberOfOnlineRegions",
       Integer.valueOf(this.regions.get()));
-    sb = Strings.appendKeyValue(sb, "stores",
+    sb = Strings.appendKeyValue(sb, "numberOfStores",
       Integer.valueOf(this.stores.get()));
-    sb = Strings.appendKeyValue(sb, "storefiles",
+    sb = Strings.appendKeyValue(sb, "numberOfStorefiles",
       Integer.valueOf(this.storefiles.get()));
-    sb = Strings.appendKeyValue(sb, "storefileIndexSize",
+    sb = Strings.appendKeyValue(sb, this.storefileIndexSizeMB.getName(),
       Integer.valueOf(this.storefileIndexSizeMB.get()));
-    sb = Strings.appendKeyValue(sb, "memstoreSize",
+    sb = Strings.appendKeyValue(sb, "rootIndexSizeKB",
+        Integer.valueOf(this.rootIndexSizeKB.get()));
+    sb = Strings.appendKeyValue(sb, "totalStaticIndexSizeKB",
+        Integer.valueOf(this.totalStaticIndexSizeKB.get()));
+    sb = Strings.appendKeyValue(sb, "totalStaticBloomSizeKB",
+        Integer.valueOf(this.totalStaticBloomSizeKB.get()));
+    sb = Strings.appendKeyValue(sb, this.memstoreSizeMB.getName(),
       Integer.valueOf(this.memstoreSizeMB.get()));
     sb = Strings.appendKeyValue(sb, "readRequestsCount",
         Long.valueOf(this.readRequestsCount.get()));
@@ -370,14 +394,14 @@ public class RegionServerMetrics implements Updater {
     // inaccessible.
     MemoryUsage memory =
       ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
-    sb = Strings.appendKeyValue(sb, "usedHeap",
+    sb = Strings.appendKeyValue(sb, "usedHeapMB",
       Long.valueOf(memory.getUsed()/MB));
-    sb = Strings.appendKeyValue(sb, "maxHeap",
+    sb = Strings.appendKeyValue(sb, "maxHeapMB",
       Long.valueOf(memory.getMax()/MB));
-    sb = Strings.appendKeyValue(sb, this.blockCacheSize.getName(),
-        Long.valueOf(this.blockCacheSize.get()));
-    sb = Strings.appendKeyValue(sb, this.blockCacheFree.getName(),
-        Long.valueOf(this.blockCacheFree.get()));
+    sb = Strings.appendKeyValue(sb, this.blockCacheSize.getName()+"MB",
+    	StringUtils.limitDecimalTo2((float)this.blockCacheSize.get()/MB));
+    sb = Strings.appendKeyValue(sb, this.blockCacheFree.getName()+"MB",
+    	StringUtils.limitDecimalTo2((float)this.blockCacheFree.get()/MB));
     sb = Strings.appendKeyValue(sb, this.blockCacheCount.getName(),
         Long.valueOf(this.blockCacheCount.get()));
     sb = Strings.appendKeyValue(sb, this.blockCacheHitCount.getName(),
@@ -387,9 +411,11 @@ public class RegionServerMetrics implements Updater {
     sb = Strings.appendKeyValue(sb, this.blockCacheEvictedCount.getName(),
         Long.valueOf(this.blockCacheEvictedCount.get()));
     sb = Strings.appendKeyValue(sb, this.blockCacheHitRatio.getName(),
-        Long.valueOf(this.blockCacheHitRatio.get()));
+        Long.valueOf(this.blockCacheHitRatio.get())+"%");
     sb = Strings.appendKeyValue(sb, this.blockCacheHitCachingRatio.getName(),
-        Long.valueOf(this.blockCacheHitCachingRatio.get()));
+        Long.valueOf(this.blockCacheHitCachingRatio.get())+"%");
+    sb = Strings.appendKeyValue(sb, this.hdfsBlocksLocalityIndex.getName(),
+        Long.valueOf(this.hdfsBlocksLocalityIndex.get()));
     return sb.toString();
   }
 }

@@ -26,13 +26,13 @@ import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.io.WritableFactories;
-import org.apache.hadoop.io.WritableUtils;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Set;
@@ -63,7 +63,8 @@ import java.util.TreeSet;
  * <p>
  * To add a filter, execute {@link #setFilter(Filter) setFilter}.
  */
-public class Get implements Writable, Row, Comparable<Row> {
+public class Get extends OperationWithAttributes
+  implements Writable, Row, Comparable<Row> {
   private static final byte GET_VERSION = (byte)2;
 
   private byte [] row = null;
@@ -74,7 +75,6 @@ public class Get implements Writable, Row, Comparable<Row> {
   private TimeRange tr = new TimeRange();
   private Map<byte [], NavigableSet<byte []>> familyMap =
     new TreeMap<byte [], NavigableSet<byte []>>(Bytes.BYTES_COMPARATOR);
-  private Map<String, byte[]> attributes;
 
   /** Constructor for Writable.  DO NOT USE */
   public Get() {}
@@ -304,103 +304,71 @@ public class Get implements Writable, Row, Comparable<Row> {
   }
 
   /**
-   * Sets arbitrary get's attribute.
-   * In case value = null attribute is removed from the attributes map.
-   * @param name attribute name
-   * @param value attribute value
-   */
-  public void setAttribute(String name, byte[] value) {
-    if (attributes == null && value == null) {
-      return;
-    }
-
-    if (attributes == null) {
-      attributes = new HashMap<String, byte[]>();
-    }
-
-    if (value == null) {
-      attributes.remove(name);
-      if (attributes.isEmpty()) {
-        this.attributes = null;
-      }
-    } else {
-      attributes.put(name, value);
-    }
-  }
-
-  /**
-   * Gets get's attribute
-   * @param name attribute name
-   * @return attribute value if attribute is set, <tt>null</tt> otherwise
-   */
-  public byte[] getAttribute(String name) {
-    if (attributes == null) {
-      return null;
-    }
-    return attributes.get(name);
-  }
-
-  /**
-   * Gets all scan's attributes
-   * @return unmodifiable map of all attributes
-   */
-  public Map<String, byte[]> getAttributesMap() {
-    if (attributes == null) {
-      return Collections.emptyMap();
-    }
-    return Collections.unmodifiableMap(attributes);
-  }
-
-  /**
-   * @return String
+   * Compile the table and column family (i.e. schema) information
+   * into a String. Useful for parsing and aggregation by debugging,
+   * logging, and administration tools.
+   * @return Map
    */
   @Override
-  public String toString() {
-    StringBuilder sb = new StringBuilder();
-    sb.append("row=");
-    sb.append(Bytes.toStringBinary(this.row));
-    sb.append(", maxVersions=");
-    sb.append("").append(this.maxVersions);
-    sb.append(", cacheBlocks=");
-    sb.append(this.cacheBlocks);
-    sb.append(", timeRange=");
-    sb.append("[").append(this.tr.getMin()).append(",");
-    sb.append(this.tr.getMax()).append(")");
-    sb.append(", families=");
-    if(this.familyMap.size() == 0) {
-      sb.append("ALL");
-      return sb.toString();
-    }
-    boolean moreThanOne = false;
-    for(Map.Entry<byte [], NavigableSet<byte[]>> entry :
+  public Map<String, Object> getFingerprint() {
+    Map<String, Object> map = new HashMap<String, Object>();
+    List<String> families = new ArrayList<String>();
+    map.put("families", families);
+    for (Map.Entry<byte [], NavigableSet<byte[]>> entry :
       this.familyMap.entrySet()) {
-      if(moreThanOne) {
-        sb.append("), ");
-      } else {
-        moreThanOne = true;
-        sb.append("{");
-      }
-      sb.append("(family=");
-      sb.append(Bytes.toString(entry.getKey()));
-      sb.append(", columns=");
-      if(entry.getValue() == null) {
-        sb.append("ALL");
-      } else {
-        sb.append("{");
-        boolean moreThanOneB = false;
-        for(byte [] column : entry.getValue()) {
-          if(moreThanOneB) {
-            sb.append(", ");
-          } else {
-            moreThanOneB = true;
-          }
-          sb.append(Bytes.toStringBinary(column));
-        }
-        sb.append("}");
-      }
+      families.add(Bytes.toStringBinary(entry.getKey()));
     }
-    sb.append("}");
-    return sb.toString();
+    return map;
+  }
+
+  /**
+   * Compile the details beyond the scope of getFingerprint (row, columns,
+   * timestamps, etc.) into a Map along with the fingerprinted information.
+   * Useful for debugging, logging, and administration tools.
+   * @param maxCols a limit on the number of columns output prior to truncation
+   * @return Map
+   */
+  @Override
+  public Map<String, Object> toMap(int maxCols) {
+    // we start with the fingerprint map and build on top of it.
+    Map<String, Object> map = getFingerprint();
+    // replace the fingerprint's simple list of families with a 
+    // map from column families to lists of qualifiers and kv details
+    Map<String, List<String>> columns = new HashMap<String, List<String>>();
+    map.put("families", columns);
+    // add scalar information first
+    map.put("row", Bytes.toStringBinary(this.row));
+    map.put("maxVersions", this.maxVersions);
+    map.put("cacheBlocks", this.cacheBlocks);
+    List<Long> timeRange = new ArrayList<Long>();
+    timeRange.add(this.tr.getMin());
+    timeRange.add(this.tr.getMax());
+    map.put("timeRange", timeRange);
+    int colCount = 0;
+    // iterate through affected families and add details
+    for (Map.Entry<byte [], NavigableSet<byte[]>> entry :
+      this.familyMap.entrySet()) {
+      List<String> familyList = new ArrayList<String>();
+      columns.put(Bytes.toStringBinary(entry.getKey()), familyList);
+      if(entry.getValue() == null) {
+        colCount++;
+        --maxCols;
+        familyList.add("ALL");
+      } else {
+        colCount += entry.getValue().size();
+        if (maxCols <= 0) {
+          continue;
+        }
+        for (byte [] column : entry.getValue()) {
+          if (--maxCols <= 0) {
+            continue;
+          }
+          familyList.add(Bytes.toStringBinary(column));
+        }
+      }   
+    }   
+    map.put("totalColumns", colCount);
+    return map;
   }
 
   //Row
@@ -443,15 +411,7 @@ public class Get implements Writable, Row, Comparable<Row> {
       }
       this.familyMap.put(family, set);
     }
-    int numAttributes = in.readInt();
-    if (numAttributes > 0) {
-      this.attributes = new HashMap<String, byte[]>();
-      for(int i=0; i<numAttributes; i++) {
-        String name = WritableUtils.readString(in);
-        byte[] value = Bytes.readByteArray(in);
-        this.attributes.put(name, value);
-      }
-    }
+    readAttributes(in);
   }
 
   public void write(final DataOutput out)
@@ -484,15 +444,7 @@ public class Get implements Writable, Row, Comparable<Row> {
         }
       }
     }
-    if (this.attributes == null) {
-      out.writeInt(0);
-    } else {
-      out.writeInt(this.attributes.size());
-      for (Map.Entry<String, byte[]> attr : this.attributes.entrySet()) {
-        WritableUtils.writeString(out, attr.getKey());
-        Bytes.writeByteArray(out, attr.getValue());
-      }
-    }    
+    writeAttributes(out);
   }
 
   @SuppressWarnings("unchecked")

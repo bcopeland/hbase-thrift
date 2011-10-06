@@ -22,7 +22,7 @@ package org.apache.hadoop.hbase.coprocessor;
 
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.HServerInfo;
+import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.UnknownRegionException;
@@ -32,12 +32,12 @@ import java.io.IOException;
 public class BaseMasterObserver implements MasterObserver {
   @Override
   public void preCreateTable(ObserverContext<MasterCoprocessorEnvironment> ctx,
-      HTableDescriptor desc, byte[][] splitKeys) throws IOException {
+      HTableDescriptor desc, HRegionInfo[] regions) throws IOException {
   }
 
   @Override
   public void postCreateTable(ObserverContext<MasterCoprocessorEnvironment> ctx,
-      HRegionInfo[] regions, boolean sync) throws IOException {
+      HTableDescriptor desc, HRegionInfo[] regions) throws IOException {
   }
 
   @Override
@@ -112,9 +112,9 @@ public class BaseMasterObserver implements MasterObserver {
 
   @Override
   public void preAssign(ObserverContext<MasterCoprocessorEnvironment> ctx,
-      byte[] regionName, boolean force) throws IOException {
+      HRegionInfo regionInfo) throws IOException {
   }
-
+  
   @Override
   public void postAssign(ObserverContext<MasterCoprocessorEnvironment> ctx,
       HRegionInfo regionInfo) throws IOException {
@@ -122,7 +122,7 @@ public class BaseMasterObserver implements MasterObserver {
 
   @Override
   public void preUnassign(ObserverContext<MasterCoprocessorEnvironment> ctx,
-      byte[] regionName, boolean force) throws IOException {
+      HRegionInfo regionInfo, boolean force) throws IOException {
   }
 
   @Override
@@ -162,6 +162,11 @@ public class BaseMasterObserver implements MasterObserver {
   }
 
   @Override
+  public void postStartMaster(ObserverContext<MasterCoprocessorEnvironment> ctx)
+      throws IOException {
+  }
+
+  @Override
   public void start(CoprocessorEnvironment ctx) throws IOException {
   }
 
@@ -172,12 +177,12 @@ public class BaseMasterObserver implements MasterObserver {
   @Override
   public void preMove(ObserverContext<MasterCoprocessorEnvironment> ctx,
       HRegionInfo region, ServerName srcServer, ServerName destServer)
-  throws UnknownRegionException {
+  throws IOException {
   }
 
   @Override
   public void postMove(ObserverContext<MasterCoprocessorEnvironment> ctx,
       HRegionInfo region, ServerName srcServer, ServerName destServer)
-  throws UnknownRegionException {
+  throws IOException {
   }
 }

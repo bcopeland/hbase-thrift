@@ -82,9 +82,14 @@ public class TestCatalogTracker {
       public void abort(String why, Throwable e) {
         LOG.info(why, e);
       }
+      
+      @Override
+      public boolean isAborted()  {
+        return false;
+      }
     };
     this.watcher = new ZooKeeperWatcher(UTIL.getConfiguration(),
-      this.getClass().getSimpleName(), this.abortable);
+      this.getClass().getSimpleName(), this.abortable, true);
   }
 
   @After public void after() {
@@ -113,7 +118,7 @@ public class TestCatalogTracker {
   @Test public void testThatIfMETAMovesWeAreNotified()
   throws IOException, InterruptedException, KeeperException {
     HConnection connection = Mockito.mock(HConnection.class);
-    final CatalogTracker ct = constructAndStartCatalogTracker(connection);
+    constructAndStartCatalogTracker(connection);
     try {
       RootLocationEditor.setRootLocation(this.watcher,
         new ServerName("example.com", 1234, System.currentTimeMillis()));

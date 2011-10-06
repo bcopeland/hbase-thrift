@@ -133,14 +133,19 @@ public class TestWALReplay {
     deleteDir(basedir);
     fs.mkdirs(new Path(basedir, hri.getEncodedName()));
 
+    HTableDescriptor htd = createBasic3FamilyHTD(tableNameStr);
+    HRegion region2 = HRegion.createHRegion(hri,
+        hbaseRootDir, this.conf, htd);
+
     final byte [] tableName = Bytes.toBytes(tableNameStr);
     final byte [] rowName = tableName;
 
     HLog wal1 = createWAL(this.conf);
     // Add 1k to each family.
     final int countPerFamily = 1000;
-    for (HColumnDescriptor hcd: hri.getTableDesc().getFamilies()) {
-      addWALEdits(tableName, hri, rowName, hcd.getName(), countPerFamily, ee, wal1);
+    for (HColumnDescriptor hcd: htd.getFamilies()) {
+      addWALEdits(tableName, hri, rowName, hcd.getName(), countPerFamily, ee,
+          wal1, htd);
     }
     wal1.close();
     runWALSplit(this.conf);
@@ -149,8 +154,9 @@ public class TestWALReplay {
     // Up the sequenceid so that these edits are after the ones added above.
     wal2.setSequenceNumber(wal1.getSequenceNumber());
     // Add 1k to each family.
-    for (HColumnDescriptor hcd: hri.getTableDesc().getFamilies()) {
-      addWALEdits(tableName, hri, rowName, hcd.getName(), countPerFamily, ee, wal2);
+    for (HColumnDescriptor hcd: htd.getFamilies()) {
+      addWALEdits(tableName, hri, rowName, hcd.getName(), countPerFamily,
+          ee, wal2, htd);
     }
     wal2.close();
     runWALSplit(this.conf);
@@ -159,7 +165,7 @@ public class TestWALReplay {
     wal3.setSequenceNumber(wal2.getSequenceNumber());
     try {
       final HRegion region = new HRegion(basedir, wal3, this.fs, this.conf, hri,
-          null);
+        htd, null);
       long seqid = region.initialize();
       assertTrue(seqid > wal3.getSequenceNumber());
 
@@ -187,11 +193,14 @@ public class TestWALReplay {
     final HRegionInfo hri = createBasic3FamilyHRegionInfo(tableNameStr);
     final Path basedir = new Path(this.hbaseRootDir, tableNameStr);
     deleteDir(basedir);
+    final HTableDescriptor htd = createBasic3FamilyHTD(tableNameStr);
+    HRegion region2 = HRegion.createHRegion(hri,
+        hbaseRootDir, this.conf, htd);
     HLog wal = createWAL(this.conf);
-    HRegion region = HRegion.openHRegion(hri, wal, this.conf);
+    HRegion region = HRegion.openHRegion(hri, htd, wal, this.conf);
     Path f =  new Path(basedir, "hfile");
-    HFile.Writer writer = new HFile.Writer(this.fs, f);
-    byte [] family = hri.getTableDesc().getFamilies().iterator().next().getName();
+    HFile.Writer writer = HFile.getWriterFactory(conf).createWriter(this.fs, f);
+    byte [] family = htd.getFamilies().iterator().next().getName();
     byte [] row = Bytes.toBytes(tableNameStr);
     writer.append(new KeyValue(row, family, family, row));
     writer.close();
@@ -209,7 +218,7 @@ public class TestWALReplay {
         runWALSplit(newConf);
         HLog wal2 = createWAL(newConf);
         HRegion region2 = new HRegion(basedir, wal2, FileSystem.get(newConf),
-          newConf, hri, null);
+          newConf, hri, htd, null);
         long seqid2 = region2.initialize();
         assertTrue(seqid2 > -1);
 
@@ -240,17 +249,20 @@ public class TestWALReplay {
     deleteDir(basedir);
     final byte[] rowName = Bytes.toBytes(tableNameStr);
     final int countPerFamily = 10;
+    final HTableDescriptor htd = createBasic3FamilyHTD(tableNameStr);
+    HRegion region3 = HRegion.createHRegion(hri,
+            hbaseRootDir, this.conf, htd);
 
     // Write countPerFamily edits into the three families.  Do a flush on one
     // of the families during the load of edits so its seqid is not same as
     // others to test we do right thing when different seqids.
     HLog wal = createWAL(this.conf);
-    HRegion region = new HRegion(basedir, wal, this.fs, this.conf, hri, null);
+    HRegion region = new HRegion(basedir, wal, this.fs, this.conf, hri, htd, null);
     long seqid = region.initialize();
     // HRegionServer usually does this. It knows the largest seqid across all regions.
     wal.setSequenceNumber(seqid);
     boolean first = true;
-    for (HColumnDescriptor hcd: hri.getTableDesc().getFamilies()) {
+    for (HColumnDescriptor hcd: htd.getFamilies()) {
       addRegionEdits(rowName, hcd.getName(), countPerFamily, this.ee, region, "x");
       if (first ) {
         // If first, so we have at least one family w/ different seqid to rest.
@@ -261,7 +273,7 @@ public class TestWALReplay {
     // Now assert edits made it in.
     final Get g = new Get(rowName);
     Result result = region.get(g, null);
-    assertEquals(countPerFamily * hri.getTableDesc().getFamilies().size(),
+    assertEquals(countPerFamily * htd.getFamilies().size(),
       result.size());
     // Now close the region, split the log, reopen the region and assert that
     // replay of log has no effect, that our seqids are calculated correctly so
@@ -270,7 +282,7 @@ public class TestWALReplay {
     wal.close();
     runWALSplit(this.conf);
     HLog wal2 = createWAL(this.conf);
-    HRegion region2 = new HRegion(basedir, wal2, this.fs, this.conf, hri, null) {
+    HRegion region2 = new HRegion(basedir, wal2, this.fs, this.conf, hri, htd, null) {
       @Override
       protected boolean restoreEdit(Store s, KeyValue kv) {
         super.restoreEdit(s, kv);
@@ -285,7 +297,7 @@ public class TestWALReplay {
     // Next test.  Add more edits, then 'crash' this region by stealing its wal
     // out from under it and assert that replay of the log adds the edits back
     // correctly when region is opened again.
-    for (HColumnDescriptor hcd: hri.getTableDesc().getFamilies()) {
+    for (HColumnDescriptor hcd: htd.getFamilies()) {
       addRegionEdits(rowName, hcd.getName(), countPerFamily, this.ee, region2, "y");
     }
     // Get count of edits.
@@ -305,7 +317,7 @@ public class TestWALReplay {
         // Make a new wal for new region open.
         HLog wal3 = createWAL(newConf);
         final AtomicInteger countOfRestoredEdits = new AtomicInteger(0);
-        HRegion region3 = new HRegion(basedir, wal3, newFS, newConf, hri, null) {
+        HRegion region3 = new HRegion(basedir, wal3, newFS, newConf, hri, htd, null) {
           @Override
           protected boolean restoreEdit(Store s, KeyValue kv) {
             boolean b = super.restoreEdit(s, kv);
@@ -319,7 +331,7 @@ public class TestWALReplay {
         Result result3 = region3.get(g, null);
         // Assert that count of cells is same as before crash.
         assertEquals(result2.size(), result3.size());
-        assertEquals(hri.getTableDesc().getFamilies().size() * countPerFamily,
+        assertEquals(htd.getFamilies().size() * countPerFamily,
           countOfRestoredEdits.get());
 
         // I can't close wal1.  Its been appropriated when we split.
@@ -342,6 +354,10 @@ public class TestWALReplay {
     final Path basedir = new Path(hbaseRootDir, tableNameStr);
     deleteDir(basedir);
     fs.mkdirs(new Path(basedir, hri.getEncodedName()));
+    final HTableDescriptor htd = createBasic3FamilyHTD(tableNameStr);
+    HRegion region2 = HRegion.createHRegion(hri,
+            hbaseRootDir, this.conf, htd);
+
     final HLog wal = createWAL(this.conf);
     final byte[] tableName = Bytes.toBytes(tableNameStr);
     final byte[] rowName = tableName;
@@ -349,12 +365,13 @@ public class TestWALReplay {
 
     // Add 1k to each family.
     final int countPerFamily = 1000;
-    for (HColumnDescriptor hcd: hri.getTableDesc().getFamilies()) {
-      addWALEdits(tableName, hri, rowName, hcd.getName(), countPerFamily, ee, wal);
+    for (HColumnDescriptor hcd: htd.getFamilies()) {
+      addWALEdits(tableName, hri, rowName, hcd.getName(), countPerFamily,
+          ee, wal, htd);
     }
 
     // Add a cache flush, shouldn't have any effect
-    long logSeqId = wal.startCacheFlush();
+    long logSeqId = wal.startCacheFlush(regionName);
     wal.completeCacheFlush(regionName, tableName, logSeqId, hri.isMetaRegion());
 
     // Add an edit to another family, should be skipped.
@@ -362,14 +379,14 @@ public class TestWALReplay {
     long now = ee.currentTimeMillis();
     edit.add(new KeyValue(rowName, Bytes.toBytes("another family"), rowName,
       now, rowName));
-    wal.append(hri, tableName, edit, now);
+    wal.append(hri, tableName, edit, now, htd);
 
     // Delete the c family to verify deletes make it over.
     edit = new WALEdit();
     now = ee.currentTimeMillis();
     edit.add(new KeyValue(rowName, Bytes.toBytes("c"), null, now,
       KeyValue.Type.DeleteFamily));
-    wal.append(hri, tableName, edit, now);
+    wal.append(hri, tableName, edit, now, htd);
 
     // Sync.
     wal.sync();
@@ -392,7 +409,7 @@ public class TestWALReplay {
         final AtomicInteger flushcount = new AtomicInteger(0);
         try {
           final HRegion region =
-              new HRegion(basedir, newWal, newFS, newConf, hri, null) {
+              new HRegion(basedir, newWal, newFS, newConf, hri, htd, null) {
             protected boolean internalFlushcache(
                 final HLog wal, final long myseqid, MonitoredTask status)
             throws IOException {
@@ -411,7 +428,7 @@ public class TestWALReplay {
           Get get = new Get(rowName);
           Result result = region.get(get, -1);
           // Make sure we only see the good edits
-          assertEquals(countPerFamily * (hri.getTableDesc().getFamilies().size() - 1),
+          assertEquals(countPerFamily * (htd.getFamilies().size() - 1),
             result.size());
           region.close();
         } finally {
@@ -441,7 +458,7 @@ public class TestWALReplay {
 
   private void addWALEdits (final byte [] tableName, final HRegionInfo hri,
       final byte [] rowName, final byte [] family,
-      final int count, EnvironmentEdge ee, final HLog wal)
+      final int count, EnvironmentEdge ee, final HLog wal, final HTableDescriptor htd)
   throws IOException {
     String familyStr = Bytes.toString(family);
     for (int j = 0; j < count; j++) {
@@ -450,7 +467,7 @@ public class TestWALReplay {
       WALEdit edit = new WALEdit();
       edit.add(new KeyValue(rowName, family, qualifierBytes,
         ee.currentTimeMillis(), columnBytes));
-      wal.append(hri, tableName, edit, ee.currentTimeMillis());
+      wal.append(hri, tableName, edit, ee.currentTimeMillis(), htd);
     }
   }
 
@@ -471,17 +488,9 @@ public class TestWALReplay {
    * column families named 'a','b', and 'c'.
    * @param tableName Name of table to use when we create HTableDescriptor.
    */
-  private HRegionInfo createBasic3FamilyHRegionInfo(final String tableName) {
-    HTableDescriptor htd = new HTableDescriptor(tableName);
-    HColumnDescriptor a = new HColumnDescriptor(Bytes.toBytes("a"));
-    htd.addFamily(a);
-    HColumnDescriptor b = new HColumnDescriptor(Bytes.toBytes("b"));
-    htd.addFamily(b);
-    HColumnDescriptor c = new HColumnDescriptor(Bytes.toBytes("c"));
-    htd.addFamily(c);
-    return new HRegionInfo(htd, null, null, false);
-  }
-
+   private HRegionInfo createBasic3FamilyHRegionInfo(final String tableName) {
+    return new HRegionInfo(Bytes.toBytes(tableName), null, null, false);
+   }
 
   /*
    * Run the split.  Verify only single split file made.
@@ -513,5 +522,16 @@ public class TestWALReplay {
     // long gone.
     HBaseTestingUtility.setMaxRecoveryErrorCount(wal.getOutputStream(), 1);
     return wal;
+  }
+
+  private HTableDescriptor createBasic3FamilyHTD(final String tableName) {
+    HTableDescriptor htd = new HTableDescriptor(tableName);
+    HColumnDescriptor a = new HColumnDescriptor(Bytes.toBytes("a"));
+    htd.addFamily(a);
+    HColumnDescriptor b = new HColumnDescriptor(Bytes.toBytes("b"));
+    htd.addFamily(b);
+    HColumnDescriptor c = new HColumnDescriptor(Bytes.toBytes("c"));
+    htd.addFamily(c);
+    return htd;
   }
 }

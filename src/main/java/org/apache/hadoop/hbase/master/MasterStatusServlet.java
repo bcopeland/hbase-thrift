@@ -23,6 +23,7 @@ import java.io.IOException;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -59,15 +60,21 @@ public class MasterStatusServlet extends HttpServlet {
     ServerName rootLocation = getRootLocationOrNull(master);
     ServerName metaLocation = master.getCatalogTracker().getMetaLocation();
     List<ServerName> servers = master.getServerManager().getOnlineServersList();
+    Set<ServerName> deadServers = master.getServerManager().getDeadServers();
 
     response.setContentType("text/html");
-    new MasterStatusTmpl()
+    MasterStatusTmpl tmpl = new MasterStatusTmpl()
       .setFrags(frags)
       .setShowAppendWarning(shouldShowAppendWarning(conf))
       .setRootLocation(rootLocation)
       .setMetaLocation(metaLocation)
       .setServers(servers)
-      .render(response.getWriter(),
+      .setDeadServers(deadServers);
+    if (request.getParameter("filter") != null)
+      tmpl.setFilter(request.getParameter("filter"));
+    if (request.getParameter("format") != null)
+      tmpl.setFormat(request.getParameter("format"));
+    tmpl.render(response.getWriter(),
           master, admin);
   }
 

@@ -60,18 +60,18 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 /**
  * Executes region split as a "transaction".  Call {@link #prepare()} to setup
- * the transaction, {@link #execute(OnlineRegions)} to run the transaction and
- * {@link #rollback(OnlineRegions)} to cleanup if execute fails.
+ * the transaction, {@link #execute(Server, RegionServerServices)} to run the
+ * transaction and {@link #rollback(OnlineRegions)} to cleanup if execute fails.
  *
  * <p>Here is an example of how you would use this class:
  * <pre>
  *  SplitTransaction st = new SplitTransaction(this.conf, parent, midKey)
  *  if (!st.prepare()) return;
  *  try {
- *    st.execute(myOnlineRegions);
+ *    st.execute(server, services);
  *  } catch (IOException ioe) {
  *    try {
- *      st.rollback(myOnlineRegions);
+ *      st.rollback(server, services);
  *      return;
  *    } catch (RuntimeException e) {
  *      myAbortable.abort("Failed split, abort");
@@ -101,7 +101,9 @@ public class SplitTransaction {
   private final byte [] splitrow;
 
   /**
-   * Types to add to the transaction journal
+   * Types to add to the transaction journal.
+   * Each enum is a step in the split transaction. Used to figure how much
+   * we need to rollback.
    */
   enum JournalEntry {
     /**
@@ -127,7 +129,13 @@ public class SplitTransaction {
     /**
      * Started in on the creation of the second daughter region.
      */
-    STARTED_REGION_B_CREATION
+    STARTED_REGION_B_CREATION,
+    /**
+     * Point of no return.
+     * If we got here, then transaction is not recoverable other than by
+     * crashing out the regionserver.
+     */
+    PONR
   }
 
   /*
@@ -137,7 +145,7 @@ public class SplitTransaction {
 
   /**
    * Constructor
-   * @param services So we can online new servces.  If null, we'll skip onlining
+   * @param services So we can online new regions.  If null, we'll skip onlining
    * (Useful testing).
    * @param c Configuration to use running split
    * @param r Region to split
@@ -156,7 +164,7 @@ public class SplitTransaction {
    */
   public boolean prepare() {
     if (this.parent.isClosed() || this.parent.isClosing()) return false;
-    // Split key can be false if this region is unsplittable; i.e. has refs.
+    // Split key can be null if this region is unsplittable; i.e. has refs.
     if (this.splitrow == null) return false;
     HRegionInfo hri = this.parent.getRegionInfo();
     parent.prepareToSplit();
@@ -170,9 +178,9 @@ public class SplitTransaction {
       return false;
     }
     long rid = getDaughterRegionIdTimestamp(hri);
-    this.hri_a = new HRegionInfo(hri.getTableDesc(), startKey, this.splitrow,
+    this.hri_a = new HRegionInfo(hri.getTableName(), startKey, this.splitrow,
       false, rid);
-    this.hri_b = new HRegionInfo(hri.getTableDesc(), this.splitrow, endKey,
+    this.hri_b = new HRegionInfo(hri.getTableName(), this.splitrow, endKey,
       false, rid);
     return true;
   }
@@ -196,13 +204,14 @@ public class SplitTransaction {
 
   /**
    * Run the transaction.
-   * @param server Hosting server instance.
+   * @param server Hosting server instance.  Can be null when testing (won't try
+   * and update in zk if a null server)
    * @param services Used to online/offline regions.
-   * @throws IOException If thrown, transaction failed. Call {@link #rollback(OnlineRegions)}
+   * @throws IOException If thrown, transaction failed. Call {@link #rollback(Server, RegionServerServices)}
    * @return Regions created
    * @throws KeeperException
    * @throws NodeExistsException 
-   * @see #rollback(OnlineRegions)
+   * @see #rollback(Server, RegionServerServices)
    */
   public PairOfSameType<HRegion> execute(final Server server,
       final RegionServerServices services)
@@ -227,7 +236,7 @@ public class SplitTransaction {
           this.fileSplitTimeout);
 
     // Set ephemeral SPLITTING znode up in zk.  Mocked servers sometimes don't
-    // have zookeeper so don't do zk stuff if zookeeper is null
+    // have zookeeper so don't do zk stuff if server or zookeeper is null
     if (server != null && server.getZooKeeper() != null) {
       try {
         this.znodeVersion = createNodeSplitting(server.getZooKeeper(),
@@ -259,13 +268,13 @@ public class SplitTransaction {
     }
     this.journal.add(JournalEntry.OFFLINED_PARENT);
 
-    // TODO: If the below were multithreaded would we complete steps in less
-    // elapsed time?  St.Ack 20100920
-
-    splitStoreFiles(this.splitdir, hstoreFilesToSplit);
+    // TODO: If splitStoreFiles were multithreaded would we complete steps in
+    // less elapsed time?  St.Ack 20100920
+    //
     // splitStoreFiles creates daughter region dirs under the parent splits dir
     // Nothing to unroll here if failure -- clean up of CREATE_SPLIT_DIR will
     // clean this up.
+    splitStoreFiles(this.splitdir, hstoreFilesToSplit);
 
     // Log to the journal that we are creating region A, the first daughter
     // region.  We could fail halfway through.  If we do, we could have left
@@ -278,37 +287,79 @@ public class SplitTransaction {
     this.journal.add(JournalEntry.STARTED_REGION_B_CREATION);
     HRegion b = createDaughterRegion(this.hri_b, this.parent.rsServices);
 
-    // Edit parent in meta
+    // Edit parent in meta.  Offlines parent region and adds splita and splitb.
+    // TODO: This can 'fail' by timing out against .META. but the edits could
+    // be applied anyways over on the server.  There is no way to tell for sure.
+    // We could try and get the edits again subsequent to their application
+    // whether we fail or not but that could fail too.  We should probably move
+    // the PONR to here before the edits go in but could mean we'd abort the
+    // regionserver when we didn't need to; i.e. the edits did not make it in.
     if (!testing) {
       MetaEditor.offlineParentInMeta(server.getCatalogTracker(),
         this.parent.getRegionInfo(), a.getRegionInfo(), b.getRegionInfo());
     }
 
-    // This is the point of no return.  We are committed to the split now.  We
-    // have still the daughter regions to open but meta has been changed.
-    // If we fail from here on out, we cannot rollback so, we'll just abort.
-    if (!testing) {
+    // This is the point of no return.  Adding subsequent edits to .META. as we
+    // do below when we do the daughter opens adding each to .META. can fail in
+    // various interesting ways the most interesting of which is a timeout
+    // BUT the edits all go through (See HBASE-3872).  IF we reach the PONR
+    // then subsequent failures need to crash out this regionserver; the
+    // server shutdown processing should be able to fix-up the incomplete split.
+    // The offlined parent will have the daughters as extra columns.  If
+    // we leave the daughter regions in place and do not remove them when we
+    // crash out, then they will have their references to the parent in place
+    // still and the server shutdown fixup of .META. will point to these
+    // regions.
+    this.journal.add(JournalEntry.PONR);
       // Open daughters in parallel.
-      DaughterOpener aOpener = new DaughterOpener(server, services, a);
-      DaughterOpener bOpener = new DaughterOpener(server, services, b);
-      aOpener.start();
-      bOpener.start();
-      try {
-        aOpener.join();
-        bOpener.join();
-      } catch (InterruptedException e) {
-        server.abort("Exception running daughter opens", e);
-      }
+    DaughterOpener aOpener = new DaughterOpener(server, services, a);
+    DaughterOpener bOpener = new DaughterOpener(server, services, b);
+    aOpener.start();
+    bOpener.start();
+    try {
+      aOpener.join();
+      bOpener.join();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IOException("Interrupted " + e.getMessage());
+    }
+    if (aOpener.getException() != null) {
+      throw new IOException("Failed " +
+        aOpener.getName(), aOpener.getException());
+    }
+    if (bOpener.getException() != null) {
+      throw new IOException("Failed " +
+        bOpener.getName(), bOpener.getException());
     }
 
     // Tell master about split by updating zk.  If we fail, abort.
     if (server != null && server.getZooKeeper() != null) {
       try {
-        transitionNodeSplit(server.getZooKeeper(), parent.getRegionInfo(),
-          a.getRegionInfo(), b.getRegionInfo(), server.getServerName(),
-          this.znodeVersion);
+        this.znodeVersion = transitionNodeSplit(server.getZooKeeper(),
+          parent.getRegionInfo(), a.getRegionInfo(), b.getRegionInfo(),
+          server.getServerName(), this.znodeVersion);
+
+        int spins = 0;
+        // Now wait for the master to process the split. We know it's done
+        // when the znode is deleted. The reason we keep tickling the znode is
+        // that it's possible for the master to miss an event.
+        do {
+          if (spins % 10 == 0) {
+            LOG.info("Still waiting on the master to process the split for " +
+                this.parent.getRegionInfo().getEncodedName());
+          }
+          Thread.sleep(100);
+          // When this returns -1 it means the znode doesn't exist
+          this.znodeVersion = tickleNodeSplit(server.getZooKeeper(),
+            parent.getRegionInfo(), a.getRegionInfo(), b.getRegionInfo(),
+            server.getServerName(), this.znodeVersion);
+          spins++;
+        } while (this.znodeVersion != -1);
       } catch (Exception e) {
-        server.abort("Failed telling master about split", e);
+        if (e instanceof InterruptedException) {
+          Thread.currentThread().interrupt();
+        }
+        throw new IOException("Failed telling master about split", e);
       }
     }
 
@@ -323,18 +374,32 @@ public class SplitTransaction {
     return new PairOfSameType<HRegion>(a, b);
   }
 
+  /*
+   * Open daughter region in its own thread.
+   * If we fail, abort this hosting server.
+   */
   class DaughterOpener extends Thread {
     private final RegionServerServices services;
     private final Server server;
     private final HRegion r;
+    private Throwable t = null;
 
     DaughterOpener(final Server s, final RegionServerServices services,
         final HRegion r) {
-      super(s.getServerName() + "-daughterOpener=" + r.getRegionInfo().getEncodedName());
+      super((s == null? "null-services": s.getServerName()) +
+        "-daughterOpener=" + r.getRegionInfo().getEncodedName());
       setDaemon(true);
       this.services = services;
       this.server = s;
       this.r = r;
+    }
+
+    /**
+     * @return Null if open succeeded else exception that causes us fail open.
+     * Call it after this thread exits else you may get wrong view on result.
+     */
+    Throwable getException() {
+      return this.t;
     }
 
     @Override
@@ -342,8 +407,7 @@ public class SplitTransaction {
       try {
         openDaughterRegion(this.server, this.services, r);
       } catch (Throwable t) {
-        this.server.abort("Failed open of daughter " +
-          this.r.getRegionInfo().getRegionNameAsString(), t);
+        this.t = t;
       }
     }
   }
@@ -351,7 +415,7 @@ public class SplitTransaction {
   /**
    * Open daughter regions, add them to online list and update meta.
    * @param server
-   * @param services
+   * @param services Can be null when testing.
    * @param daughter
    * @throws IOException
    * @throws KeeperException
@@ -359,20 +423,23 @@ public class SplitTransaction {
   void openDaughterRegion(final Server server,
       final RegionServerServices services, final HRegion daughter)
   throws IOException, KeeperException {
-    if (server.isStopped() || services.isStopping()) {
+    boolean stopped = server != null && server.isStopped();
+    boolean stopping = services != null && services.isStopping();
+    if (stopped || stopping) {
       MetaEditor.addDaughter(server.getCatalogTracker(),
         daughter.getRegionInfo(), null);
       LOG.info("Not opening daughter " +
         daughter.getRegionInfo().getRegionNameAsString() +
-        " because stopping=" + services.isStopping() + ", stopped=" +
-        server.isStopped());
+        " because stopping=" + stopping + ", stopped=" + server.isStopped());
       return;
     }
     HRegionInfo hri = daughter.getRegionInfo();
-    LoggingProgressable reporter =
+    LoggingProgressable reporter = server == null? null:
       new LoggingProgressable(hri, server.getConfiguration());
     HRegion r = daughter.openHRegion(reporter);
-    services.postOpenDeployTasks(r, server.getCatalogTracker(), true);
+    if (services != null) {
+      services.postOpenDeployTasks(r, server.getCatalogTracker(), true);
+    }
   }
 
   static class LoggingProgressable implements CancelableProgressable {
@@ -545,7 +612,7 @@ public class SplitTransaction {
       this.splitdir, hri);
     HRegion r = HRegion.newHRegion(this.parent.getTableDir(),
       this.parent.getLog(), fs, this.parent.getConf(),
-      hri, rsServices);
+      hri, this.parent.getTableDesc(), rsServices);
     r.readRequestsCount.set(this.parent.getReadRequestsCount() / 2);
     r.writeRequestsCount.set(this.parent.getWriteRequestsCount() / 2);
     HRegion.moveInitialFilesIntoPlace(fs, regionDir, r.getRegionDir());
@@ -576,16 +643,19 @@ public class SplitTransaction {
   }
 
   /**
-   * @param or Object that can online/offline parent region.  Can be passed null
-   * by unit tests.
-   * @return The region we were splitting
+   * @param server Hosting server instance (May be null when testing).
+   * @param services
    * @throws IOException If thrown, rollback failed.  Take drastic action.
+   * @return True if we successfully rolled back, false if we got to the point
+   * of no return and so now need to abort the server to minimize damage.
    */
-  public void rollback(final Server server, final OnlineRegions or)
+  public boolean rollback(final Server server, final RegionServerServices services)
   throws IOException {
+    boolean result = true;
     FileSystem fs = this.parent.getFilesystem();
     ListIterator<JournalEntry> iterator =
       this.journal.listIterator(this.journal.size());
+    // Iterate in reverse.
     while (iterator.hasPrevious()) {
       JournalEntry je = iterator.previous();
       switch(je) {
@@ -620,13 +690,21 @@ public class SplitTransaction {
         break;
 
       case OFFLINED_PARENT:
-        if (or != null) or.addToOnlineRegions(this.parent);
+        if (services != null) services.addToOnlineRegions(this.parent);
         break;
+
+      case PONR:
+        // We got to the point-of-no-return so we need to just abort. Return
+        // immediately.  Do not clean up created daughter regions.  They need
+        // to be in place so we don't delete the parent region mistakenly.
+        // See HBASE-3872.
+        return false;
 
       default:
         throw new RuntimeException("Unhandled journal entry: " + je);
       }
     }
+    return result;
   }
 
   HRegionInfo getFirstDaughter() {
@@ -701,13 +779,10 @@ public class SplitTransaction {
     RegionTransitionData data =
       new RegionTransitionData(EventType.RS_ZK_REGION_SPLITTING,
         region.getRegionName(), serverName);
-    // This synchronization is copied from ZKAssign.
-    synchronized(zkw.getNodes()) {
-      String node = ZKAssign.getNodeName(zkw, region.getEncodedName());
-      zkw.getNodes().add(node);
-      if (!ZKUtil.createEphemeralNodeAndWatch(zkw, node, data.getBytes())) {
-        throw new IOException("Failed create of ephemeral " + node);
-      }
+
+    String node = ZKAssign.getNodeName(zkw, region.getEncodedName());
+    if (!ZKUtil.createEphemeralNodeAndWatch(zkw, node, data.getBytes())) {
+      throw new IOException("Failed create of ephemeral " + node);
     }
     // Transition node from SPLITTING to SPLITTING and pick up version so we
     // can be sure this znode is ours; version is needed deleting.
@@ -763,5 +838,15 @@ public class SplitTransaction {
   throws KeeperException, IOException {
     return ZKAssign.transitionNode(zkw, parent, serverName,
       EventType.RS_ZK_REGION_SPLITTING, EventType.RS_ZK_REGION_SPLITTING, version);
+  }
+
+  private static int tickleNodeSplit(ZooKeeperWatcher zkw,
+      HRegionInfo parent, HRegionInfo a, HRegionInfo b, ServerName serverName,
+      final int znodeVersion)
+  throws KeeperException, IOException {
+    byte [] payload = Writables.getBytes(a, b);
+    return ZKAssign.transitionNode(zkw, parent, serverName,
+      EventType.RS_ZK_REGION_SPLIT, EventType.RS_ZK_REGION_SPLIT,
+      znodeVersion, payload);
   }
 }

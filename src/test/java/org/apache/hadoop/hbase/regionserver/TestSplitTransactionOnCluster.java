@@ -64,13 +64,18 @@ public class TestSplitTransactionOnCluster {
     LogFactory.getLog(TestSplitTransactionOnCluster.class);
   private HBaseAdmin admin = null;
   private MiniHBaseCluster cluster = null;
+  private static final int NB_SERVERS = 2;
 
   private static final HBaseTestingUtility TESTING_UTIL =
     new HBaseTestingUtility();
 
   @BeforeClass public static void before() throws Exception {
     TESTING_UTIL.getConfiguration().setInt("hbase.balancer.period", 60000);
-    TESTING_UTIL.startMiniCluster(2);
+    // Needed because some tests have splits happening on RS that are killed
+    // We don't want to wait 3min for the master to figure it out
+    TESTING_UTIL.getConfiguration().setInt(
+        "hbase.master.assignment.timeoutmonitor.timeout", 4000);
+    TESTING_UTIL.startMiniCluster(NB_SERVERS);
   }
 
   @AfterClass public static void after() throws Exception {
@@ -78,7 +83,7 @@ public class TestSplitTransactionOnCluster {
   }
 
   @Before public void setup() throws IOException {
-    TESTING_UTIL.ensureSomeRegionServersAvailable(2);
+    TESTING_UTIL.ensureSomeRegionServersAvailable(NB_SERVERS);
     this.admin = new HBaseAdmin(TESTING_UTIL.getConfiguration());
     this.cluster = TESTING_UTIL.getMiniHBaseCluster();
   }
@@ -86,69 +91,6 @@ public class TestSplitTransactionOnCluster {
   private HRegionInfo getAndCheckSingleTableRegion(final List<HRegion> regions) {
     assertEquals(1, regions.size());
     return regions.get(0).getRegionInfo();
-  }
-
-  /**
-   * Test what happens if master goes to balance a region just as regionserver
-   * goes to split it.  The PENDING_CLOSE state is the strange one since its
-   * in the Master's head only, not out in zk.  Test this case.
-   * @throws IOException
-   * @throws InterruptedException
-   * @throws NodeExistsException
-   * @throws KeeperException
-   */
-  @Test (timeout = 600000) public void testPendingCloseAndSplit()
-  throws IOException, InterruptedException, NodeExistsException, KeeperException {
-    final byte [] tableName = Bytes.toBytes("pendingCloseAndSplit");
-
-    // Create table then get the single region for our new table.
-    HTable t = TESTING_UTIL.createTable(tableName, HConstants.CATALOG_FAMILY);
-
-    List<HRegion> regions = cluster.getRegions(tableName);
-    HRegionInfo hri = getAndCheckSingleTableRegion(regions);
-
-    int tableRegionIndex = ensureTableRegionNotOnSameServerAsMeta(admin, hri);
-
-    // Turn off balancer so it doesn't cut in and mess up our placements.
-    this.admin.balanceSwitch(false);
-    // Turn off the meta scanner so it don't remove parent on us.
-    this.cluster.getMaster().setCatalogJanitorEnabled(false);
-    try {
-      // Add a bit of load up into the table so splittable.
-      TESTING_UTIL.loadTable(t, HConstants.CATALOG_FAMILY);
-      // Get region pre-split.
-      HRegionServer server = cluster.getRegionServer(tableRegionIndex);
-      printOutRegions(server, "Initial regions: ");
-      int regionCount = server.getOnlineRegions().size();
-      // Now send in a close of a region but first make the close on the regionserver
-      // a NOOP.  This way the master has all the state of it going to close
-      // but then a SPLITTING arrives.  This is what we want to test.
-      // Here is how we turn CLOSE into NOOP in test.
-      MiniHBaseCluster.MiniHBaseClusterRegionServer.TEST_SKIP_CLOSE = true;
-      this.cluster.getMaster().unassign(hri.getRegionName(), false);
-      // Now try splitting and it should work.
-      LOG.info("Running split on server " + server.toString());
-      split(hri, server, regionCount);
-      // Get daughters
-      List<HRegion> daughters = this.cluster.getRegions(tableName);
-      assertTrue(daughters.size() >= 2);
-      // Assert the ephemeral node is gone in zk.
-      String path = ZKAssign.getNodeName(t.getConnection().getZooKeeperWatcher(),
-        hri.getEncodedName());
-      Stat stat = null;
-      for (int i = 0; i < 10; i++) {
-        stat = t.getConnection().getZooKeeperWatcher().getZooKeeper().exists(path, false);
-        LOG.info("Stat for znode path=" + path + ": " + stat);
-        if (stat == null) break;
-        org.apache.hadoop.hbase.util.Threads.sleep(100);
-      }
-      assertTrue(stat == null);
-    } finally {
-      // Set this flag back.
-      MiniHBaseCluster.MiniHBaseClusterRegionServer.TEST_SKIP_CLOSE = false;
-      admin.balanceSwitch(true);
-      cluster.getMaster().setCatalogJanitorEnabled(true);
-    }
   }
 
   /**
@@ -161,7 +103,7 @@ public class TestSplitTransactionOnCluster {
    * @throws NodeExistsException
    * @throws KeeperException
    */
-  @Test (timeout = 600000) public void testRSSplitEphemeralsDisappearButDaughtersAreOnlinedAfterShutdownHandling()
+  @Test (timeout = 300000) public void testRSSplitEphemeralsDisappearButDaughtersAreOnlinedAfterShutdownHandling()
   throws IOException, InterruptedException, NodeExistsException, KeeperException {
     final byte [] tableName =
       Bytes.toBytes("ephemeral");
@@ -197,7 +139,7 @@ public class TestSplitTransactionOnCluster {
       String path = ZKAssign.getNodeName(t.getConnection().getZooKeeperWatcher(),
         hri.getEncodedName());
       Stat stats =
-        t.getConnection().getZooKeeperWatcher().getZooKeeper().exists(path, false);
+        t.getConnection().getZooKeeperWatcher().getRecoverableZooKeeper().exists(path, false);
       LOG.info("EPHEMERAL NODE BEFORE SERVER ABORT, path=" + path + ", stats=" + stats);
       RegionTransitionData rtd =
         ZKAssign.getData(t.getConnection().getZooKeeperWatcher(),
@@ -207,10 +149,8 @@ public class TestSplitTransactionOnCluster {
         rtd.getEventType().equals(EventType.RS_ZK_REGION_SPLITTING));
       // Now crash the server
       cluster.abortRegionServer(tableRegionIndex);
-      while(server.getOnlineRegions().size() > 0) {
-        LOG.info("Waiting on server to go down");
-        Thread.sleep(100);
-      }
+      waitUntilRegionServerDead();
+
       // Wait till regions are back on line again.
       while(cluster.getRegions(tableName).size() < daughters.size()) {
         LOG.info("Waiting for repair to happen");
@@ -222,7 +162,7 @@ public class TestSplitTransactionOnCluster {
         assertTrue(daughters.contains(r));
       }
       // Finally assert that the ephemeral SPLIT znode was cleaned up.
-      stats = t.getConnection().getZooKeeperWatcher().getZooKeeper().exists(path, false);
+      stats = t.getConnection().getZooKeeperWatcher().getRecoverableZooKeeper().exists(path, false);
       LOG.info("EPHEMERAL NODE AFTER SERVER ABORT, path=" + path + ", stats=" + stats);
       assertTrue(stats == null);
     } finally {
@@ -233,7 +173,7 @@ public class TestSplitTransactionOnCluster {
     }
   }
 
-  @Test (timeout = 600000) public void testExistingZnodeBlocksSplitAndWeRollback()
+  @Test (timeout = 300000) public void testExistingZnodeBlocksSplitAndWeRollback()
   throws IOException, InterruptedException, NodeExistsException, KeeperException {
     final byte [] tableName =
       Bytes.toBytes("testExistingZnodeBlocksSplitAndWeRollback");
@@ -293,7 +233,7 @@ public class TestSplitTransactionOnCluster {
    * @throws IOException
    * @throws InterruptedException
    */
-  @Test (timeout = 600000) public void testShutdownSimpleFixup()
+  @Test (timeout = 300000) public void testShutdownSimpleFixup()
   throws IOException, InterruptedException {
     final byte [] tableName = Bytes.toBytes("testShutdownSimpleFixup");
 
@@ -326,10 +266,7 @@ public class TestSplitTransactionOnCluster {
       removeDaughterFromMeta(daughters.get(0).getRegionName());
       // Now crash the server
       cluster.abortRegionServer(tableRegionIndex);
-      while(server.getOnlineRegions().size() > 0) {
-        LOG.info("Waiting on server to go down");
-        Thread.sleep(100);
-      }
+      waitUntilRegionServerDead();
       // Wait till regions are back on line again.
       while(cluster.getRegions(tableName).size() < daughters.size()) {
         LOG.info("Waiting for repair to happen");
@@ -352,7 +289,7 @@ public class TestSplitTransactionOnCluster {
    * @throws IOException
    * @throws InterruptedException
    */
-  @Test public void testShutdownFixupWhenDaughterHasSplit()
+  @Test (timeout=300000) public void testShutdownFixupWhenDaughterHasSplit()
   throws IOException, InterruptedException {
     final byte [] tableName =
       Bytes.toBytes("testShutdownFixupWhenDaughterHasSplit");
@@ -402,10 +339,7 @@ public class TestSplitTransactionOnCluster {
       daughters = cluster.getRegions(tableName);
       // Now crash the server
       cluster.abortRegionServer(tableRegionIndex);
-      while(server.getOnlineRegions().size() > 0) {
-        LOG.info("Waiting on server to go down");
-        Thread.sleep(100);
-      }
+      waitUntilRegionServerDead();
       // Wait till regions are back on line again.
       while(cluster.getRegions(tableName).size() < daughters.size()) {
         LOG.info("Waiting for repair to happen");
@@ -508,10 +442,20 @@ public class TestSplitTransactionOnCluster {
     return null;
   }
 
-  private void printOutRegions(final HRegionServer hrs, final String prefix) {
+  private void printOutRegions(final HRegionServer hrs, final String prefix)
+      throws IOException {
     List<HRegionInfo> regions = hrs.getOnlineRegions();
     for (HRegionInfo region: regions) {
       LOG.info(prefix + region.getRegionNameAsString());
+    }
+  }
+
+  private void waitUntilRegionServerDead() throws InterruptedException {
+    // Wait until the master processes the RS shutdown
+    while (cluster.getMaster().getClusterStatus().
+        getServers().size() == NB_SERVERS) {
+      LOG.info("Waiting on server to go down");
+      Thread.sleep(100);
     }
   }
 }

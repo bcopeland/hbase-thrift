@@ -1,5 +1,5 @@
 /**
- * Copyright 2010 The Apache Software Foundation
+ * Copyright 2011 The Apache Software Foundation
  *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -44,6 +44,7 @@ import org.apache.hadoop.hbase.MasterNotRunningException;
 import org.apache.hadoop.hbase.NotAllMetaRegionsOnlineException;
 import org.apache.hadoop.hbase.Server;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.TableDescriptors;
 import org.apache.hadoop.hbase.TableExistsException;
 import org.apache.hadoop.hbase.TableNotDisabledException;
 import org.apache.hadoop.hbase.TableNotFoundException;
@@ -51,9 +52,11 @@ import org.apache.hadoop.hbase.UnknownRegionException;
 import org.apache.hadoop.hbase.catalog.CatalogTracker;
 import org.apache.hadoop.hbase.catalog.MetaEditor;
 import org.apache.hadoop.hbase.catalog.MetaReader;
+import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.MetaScanner;
-import org.apache.hadoop.hbase.client.MetaScanner.MetaScannerVisitor;
 import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.MetaScanner.MetaScannerVisitor;
+import org.apache.hadoop.hbase.coprocessor.CoprocessorHost;
 import org.apache.hadoop.hbase.executor.ExecutorService;
 import org.apache.hadoop.hbase.executor.ExecutorService.ExecutorType;
 import org.apache.hadoop.hbase.ipc.HBaseRPC;
@@ -61,7 +64,7 @@ import org.apache.hadoop.hbase.ipc.HBaseServer;
 import org.apache.hadoop.hbase.ipc.HMasterInterface;
 import org.apache.hadoop.hbase.ipc.HMasterRegionInterface;
 import org.apache.hadoop.hbase.ipc.RpcServer;
-import org.apache.hadoop.hbase.master.LoadBalancer.RegionPlan;
+import org.apache.hadoop.hbase.master.RegionPlan;
 import org.apache.hadoop.hbase.master.handler.DeleteTableHandler;
 import org.apache.hadoop.hbase.master.handler.DisableTableHandler;
 import org.apache.hadoop.hbase.master.handler.EnableTableHandler;
@@ -69,13 +72,18 @@ import org.apache.hadoop.hbase.master.handler.ModifyTableHandler;
 import org.apache.hadoop.hbase.master.handler.TableAddFamilyHandler;
 import org.apache.hadoop.hbase.master.handler.TableDeleteFamilyHandler;
 import org.apache.hadoop.hbase.master.handler.TableModifyFamilyHandler;
+import org.apache.hadoop.hbase.master.handler.CreateTableHandler;
 import org.apache.hadoop.hbase.master.metrics.MasterMetrics;
+import org.apache.hadoop.hbase.monitoring.MemoryBoundedLogMessageBuffer;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.monitoring.TaskMonitor;
 import org.apache.hadoop.hbase.regionserver.HRegion;
+import org.apache.hadoop.hbase.regionserver.wal.HLog;
 import org.apache.hadoop.hbase.replication.regionserver.Replication;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.FSTableDescriptors;
+import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.InfoServer;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.Sleeper;
@@ -150,6 +158,11 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
   private CatalogTracker catalogTracker;
   // Cluster status zk tracker and local setter
   private ClusterStatusTracker clusterStatusTracker;
+  
+  // buffer for "fatal error" notices from region servers
+  // in the cluster. This is only used for assisting
+  // operations/debugging.
+  private MemoryBoundedLogMessageBuffer rsFatals;
 
   // This flag is for stopping this Master instance.  Its set when we are
   // stopping or aborting
@@ -175,6 +188,8 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
   private MasterCoprocessorHost cpHost;
   private final ServerName serverName;
 
+  private TableDescriptors tableDescriptors;
+  
   /**
    * Initializes the HMaster. The steps are as follows:
    * <p>
@@ -215,6 +230,8 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     this.isa = this.rpcServer.getListenerAddress();
     this.serverName = new ServerName(this.isa.getHostName(),
       this.isa.getPort(), System.currentTimeMillis());
+    this.rsFatals = new MemoryBoundedLogMessageBuffer(
+        conf.getLong("hbase.master.buffer.for.rs.fatals", 1*1024*1024));
 
     // initialize server principal (if using secure Hadoop)
     User.login(conf, "hbase.master.keytab.file",
@@ -231,7 +248,7 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     if (this.conf.get("mapred.task.id") == null) {
       this.conf.set("mapred.task.id", "hb_m_" + this.serverName.toString());
     }
-    this.zooKeeper = new ZooKeeperWatcher(conf, MASTER + ":" + isa.getPort(), this);
+    this.zooKeeper = new ZooKeeperWatcher(conf, MASTER + ":" + isa.getPort(), this, true);
     this.metrics = new MasterMetrics(getServerName().toString());
   }
 
@@ -347,7 +364,7 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
 
     this.assignmentManager = new AssignmentManager(this, serverManager,
         this.catalogTracker, this.executorService);
-    this.balancer = new LoadBalancer(conf);
+    this.balancer = LoadBalancerFactory.getLoadBalancer(conf);
     zooKeeper.registerListenerFirst(assignmentManager);
 
     this.regionServerTracker = new RegionServerTracker(zooKeeper, this,
@@ -363,7 +380,7 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
 
     LOG.info("Server active/primary master; " + this.serverName +
         ", sessionid=0x" +
-        Long.toHexString(this.zooKeeper.getZooKeeper().getSessionId()) +
+        Long.toHexString(this.zooKeeper.getRecoverableZooKeeper().getSessionId()) +
         ", cluster-up flag was=" + wasUp);
   }
 
@@ -407,12 +424,15 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
 
     status.setStatus("Initializing Master file system");
     // TODO: Do this using Dependency Injection, using PicoContainer, Guice or Spring.
-    this.fileSystemManager = new MasterFileSystem(this, metrics);
+    this.fileSystemManager = new MasterFileSystem(this, this, metrics);
+
+    this.tableDescriptors =
+      new FSTableDescriptors(this.fileSystemManager.getFileSystem(),
+      this.fileSystemManager.getRootDir());
 
     // publish cluster ID
     status.setStatus("Publishing Cluster ID in ZooKeeper");
-    ClusterId.setClusterId(this.zooKeeper,
-        fileSystemManager.getClusterId());
+    ClusterId.setClusterId(this.zooKeeper, fileSystemManager.getClusterId());
 
     this.executorService = new ExecutorService(getServerName().toString());
 
@@ -447,11 +467,18 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
 
     // Make sure root and meta assigned before proceeding.
     assignRootAndMeta(status);
-    
+    // Update meta with new HRI if required. i.e migrate all HRI with HTD to
+    // HRI with out HTD in meta and update the status in ROOT. This must happen
+    // before we assign all user regions or else the assignment will fail.
+    updateMetaWithNewHRI();
+
     // Fixup assignment manager status
     status.setStatus("Starting assignment manager");
     this.assignmentManager.joinCluster();
 
+    this.balancer.setClusterStatus(getClusterStatus());
+    this.balancer.setMasterServices(this);
+    
     // Start balancer and meta catalog janitor after meta and regions have
     // been assigned.
     status.setStatus("Starting balancer and catalog janitor");
@@ -462,6 +489,54 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     status.markComplete("Initialization successful");
     LOG.info("Master has completed initialization");
     initialized = true;
+
+    if (this.cpHost != null) {
+      // don't let cp initialization errors kill the master
+      try {
+        this.cpHost.postStartMaster();
+      } catch (IOException ioe) {
+        LOG.error("Coprocessor postStartMaster() hook failed", ioe);
+      }
+    }
+  }
+
+  public boolean isMetaHRIUpdated()
+      throws IOException {
+    boolean metaUpdated = false;
+    Get get = new Get(HRegionInfo.FIRST_META_REGIONINFO.getRegionName());
+    get.addColumn(HConstants.CATALOG_FAMILY,
+        HConstants.META_MIGRATION_QUALIFIER);
+    Result r =
+        catalogTracker.waitForRootServerConnectionDefault().get(
+        HRegionInfo.ROOT_REGIONINFO.getRegionName(), get);
+    if (r != null && r.getBytes() != null)
+    {
+      byte[] metaMigrated = r.getValue(HConstants.CATALOG_FAMILY,
+          HConstants.META_MIGRATION_QUALIFIER);
+      String migrated = Bytes.toString(metaMigrated);
+      metaUpdated = new Boolean(migrated).booleanValue();
+    } else {
+      LOG.info("metaUpdated = NULL.");
+    }
+    LOG.info("Meta updated status = " + metaUpdated);
+    return metaUpdated;
+  }
+
+
+  boolean updateMetaWithNewHRI() throws IOException {
+    if (!isMetaHRIUpdated()) {
+      LOG.info("Meta has HRI with HTDs. Updating meta now.");
+      try {
+        MetaEditor.migrateRootAndMeta(this);
+        LOG.info("ROOT and Meta updated with new HRI.");
+        return true;
+      } catch (IOException e) {
+        throw new RuntimeException("Update ROOT/Meta with new HRI failed." +
+            "Master startup aborted.");
+      }
+    }
+    LOG.info("ROOT/Meta already up-to date with new HRI.");
+    return true;
   }
 
   /**
@@ -484,6 +559,8 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     if (!catalogTracker.verifyRootRegionLocation(timeout)) {
       this.assignmentManager.assignRoot();
       this.catalogTracker.waitForRoot();
+      //This guarantees that the transition has completed
+      this.assignmentManager.waitForAssignment(HRegionInfo.ROOT_REGIONINFO);
       assigned++;
     } else {
       // Region already assigned.  We didnt' assign it.  Add to in-memory state.
@@ -524,6 +601,11 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     // unknown protocol
     LOG.warn("Version requested for unimplemented protocol: "+protocol);
     return -1;
+  }
+
+  @Override
+  public TableDescriptors getTableDescriptors() {
+    return this.tableDescriptors;
   }
 
   /** @return InfoServer object. Maybe null.*/
@@ -595,8 +677,9 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
    int port = this.conf.getInt("hbase.master.info.port", 60010);
    if (port >= 0) {
      String a = this.conf.get("hbase.master.info.bindAddress", "0.0.0.0");
-     this.infoServer = new InfoServer(MASTER, a, port, false);
+     this.infoServer = new InfoServer(MASTER, a, port, false, this.conf);
      this.infoServer.addServlet("status", "/master-status", MasterStatusServlet.class);
+     this.infoServer.addServlet("dump", "/dump", MasterDumpServlet.class);
      this.infoServer.setAttribute(MASTER, this);
      this.infoServer.start();
     }
@@ -685,8 +768,17 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     this.serverManager.regionServerReport(new ServerName(sn), hsl);
     if (hsl != null && this.metrics != null) {
       // Up our metrics.
-      this.metrics.incrementRequests(hsl.getNumberOfRequests());
+      this.metrics.incrementRequests(hsl.getTotalNumberOfRequests());
     }
+  }
+
+  @Override
+  public void reportRSFatalError(byte [] sn, String errorText) {
+    ServerName serverName = new ServerName(sn);
+    String msg = "Region server " + serverName + " reported a fatal error:\n"
+        + errorText;
+    LOG.error(msg);
+    rsFatals.add(msg);
   }
 
   public boolean isMasterRunning() {
@@ -787,23 +879,48 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     return balancerRan;
   }
 
-  @Override
-  public boolean balanceSwitch(final boolean b) {
+  enum BalanceSwitchMode {
+    SYNC,
+    ASYNC
+  }
+  /**
+   * Assigns balancer switch according to BalanceSwitchMode
+   * @param b new balancer switch
+   * @param mode BalanceSwitchMode
+   * @return old balancer switch
+   */
+  public boolean switchBalancer(final boolean b, BalanceSwitchMode mode) {
     boolean oldValue = this.balanceSwitch;
     boolean newValue = b;
     try {
       if (this.cpHost != null) {
         newValue = this.cpHost.preBalanceSwitch(newValue);
       }
-      this.balanceSwitch = newValue;
-      LOG.info("Balance=" + newValue);
+      if (mode == BalanceSwitchMode.SYNC) {
+        synchronized (this.balancer) {        
+          this.balanceSwitch = newValue;
+        }
+      } else {
+        this.balanceSwitch = newValue;        
+      }
+      LOG.info("BalanceSwitch=" + newValue);
       if (this.cpHost != null) {
         this.cpHost.postBalanceSwitch(oldValue, newValue);
       }
     } catch (IOException ioe) {
       LOG.warn("Error flipping balance switch", ioe);
     }
-    return oldValue;
+    return oldValue;    
+  }
+  
+  @Override
+  public boolean synchronousBalanceSwitch(final boolean b) {
+    return switchBalancer(b, BalanceSwitchMode.SYNC);
+  }
+  
+  @Override
+  public boolean balanceSwitch(final boolean b) {
+    return switchBalancer(b, BalanceSwitchMode.ASYNC);
   }
 
   /**
@@ -833,118 +950,67 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
       this.assignmentManager.unassign(hri);
     } else {
       dest = new ServerName(Bytes.toString(destServerName));
-      if (this.cpHost != null) {
-        this.cpHost.preMove(p.getFirst(), p.getSecond(), dest);
-      }
-      RegionPlan rp = new RegionPlan(p.getFirst(), p.getSecond(), dest);
-      LOG.info("Added move plan " + rp + ", running balancer");
-      this.assignmentManager.balance(rp);
-      if (this.cpHost != null) {
-        this.cpHost.postMove(p.getFirst(), p.getSecond(), dest);
+      try {
+        if (this.cpHost != null) {
+          if (this.cpHost.preMove(p.getFirst(), p.getSecond(), dest)) {
+            return;
+          }
+        }
+        RegionPlan rp = new RegionPlan(p.getFirst(), p.getSecond(), dest);
+        LOG.info("Added move plan " + rp + ", running balancer");
+        this.assignmentManager.balance(rp);
+        if (this.cpHost != null) {
+          this.cpHost.postMove(p.getFirst(), p.getSecond(), dest);
+        }
+      } catch (IOException ioe) {
+        UnknownRegionException ure = new UnknownRegionException(
+            Bytes.toStringBinary(encodedRegionName));
+        ure.initCause(ioe);
+        throw ure;
       }
     }
   }
 
-  public void createTable(HTableDescriptor desc, byte [][] splitKeys)
-  throws IOException {
-    createTable(desc, splitKeys, false);
-  }
-
-  public void createTable(HTableDescriptor desc, byte [][] splitKeys,
-      boolean sync)
+  public void createTable(HTableDescriptor hTableDescriptor,
+    byte [][] splitKeys)
   throws IOException {
     if (!isMasterRunning()) {
       throw new MasterNotRunningException();
     }
+
+    HRegionInfo [] newRegions = getHRegionInfos(hTableDescriptor, splitKeys);
     if (cpHost != null) {
-      cpHost.preCreateTable(desc, splitKeys);
+      cpHost.preCreateTable(hTableDescriptor, newRegions);
     }
-    HRegionInfo [] newRegions = null;
-    if(splitKeys == null || splitKeys.length == 0) {
-      newRegions = new HRegionInfo [] { new HRegionInfo(desc, null, null) };
+
+    this.executorService.submit(new CreateTableHandler(this,
+      this.fileSystemManager, this.serverManager, hTableDescriptor, conf,
+      newRegions, catalogTracker, assignmentManager));
+
+    if (cpHost != null) {
+      cpHost.postCreateTable(hTableDescriptor, newRegions);
+    }
+  }
+
+  private HRegionInfo[] getHRegionInfos(HTableDescriptor hTableDescriptor,
+    byte[][] splitKeys) {
+    HRegionInfo[] hRegionInfos = null;
+    if (splitKeys == null || splitKeys.length == 0) {
+      hRegionInfos = new HRegionInfo[]{
+          new HRegionInfo(hTableDescriptor.getName(), null, null)};
     } else {
       int numRegions = splitKeys.length + 1;
-      newRegions = new HRegionInfo[numRegions];
-      byte [] startKey = null;
-      byte [] endKey = null;
-      for(int i=0;i<numRegions;i++) {
+      hRegionInfos = new HRegionInfo[numRegions];
+      byte[] startKey = null;
+      byte[] endKey = null;
+      for (int i = 0; i < numRegions; i++) {
         endKey = (i == splitKeys.length) ? null : splitKeys[i];
-        newRegions[i] = new HRegionInfo(desc, startKey, endKey);
+        hRegionInfos[i] =
+            new HRegionInfo(hTableDescriptor.getName(), startKey, endKey);
         startKey = endKey;
       }
     }
-    int timeout = conf.getInt("hbase.client.catalog.timeout", 10000);
-    // Need META availability to create a table
-    try {
-      if(catalogTracker.waitForMeta(timeout) == null) {
-        throw new NotAllMetaRegionsOnlineException();
-      }
-    } catch (InterruptedException e) {
-      LOG.warn("Interrupted waiting for meta availability", e);
-      throw new IOException(e);
-    }
-    createTable(newRegions, sync);
-  }
-
-  private synchronized void createTable(final HRegionInfo [] newRegions,
-      final boolean sync)
-  throws IOException {
-    String tableName = newRegions[0].getTableDesc().getNameAsString();
-    if(MetaReader.tableExists(catalogTracker, tableName)) {
-      throw new TableExistsException(tableName);
-    }
-    for (HRegionInfo newRegion : newRegions) {
-      // 1. Set table enabling flag up in zk.
-      try {
-        assignmentManager.getZKTable().setEnabledTable(tableName);
-      } catch (KeeperException e) {
-        throw new IOException("Unable to ensure that the table will be" +
-          " enabled because of a ZooKeeper issue", e);
-      }
-
-      // 2. Create HRegion
-      HRegion region = HRegion.createHRegion(newRegion,
-        fileSystemManager.getRootDir(), conf);
-
-      // 3. Insert into META
-      MetaEditor.addRegionToMeta(catalogTracker, region.getRegionInfo());
-
-      // 4. Close the new region to flush to disk.  Close log file too.
-      region.close();
-      region.getLog().closeAndDelete();
-    }
-
-    if (newRegions.length == 1) {
-      this.assignmentManager.assign(newRegions[0], true);
-    } else {
-    // 5. Trigger immediate assignment of the regions in round-robin fashion
-    List<ServerName> servers = serverManager.getOnlineServersList();
-    try {
-      this.assignmentManager.assignUserRegions(Arrays.asList(newRegions), servers);
-    } catch (InterruptedException ie) {
-      LOG.error("Caught " + ie + " during round-robin assignment");
-      throw new IOException(ie);
-    }
-    }
-
-    // 6. If sync, wait for assignment of regions
-    if (sync) {
-      LOG.debug("Waiting for " + newRegions.length + " region(s) to be assigned");
-      for (HRegionInfo regionInfo : newRegions) {
-        try {
-          this.assignmentManager.waitForAssignment(regionInfo);
-        } catch (InterruptedException e) {
-          LOG.info("Interrupted waiting for region to be assigned during " +
-              "create table call", e);
-          Thread.currentThread().interrupt();
-          return;
-        }
-      }
-    }
-
-    if (cpHost != null) {
-      cpHost.postCreateTable(newRegions, sync);
-    }
+    return hRegionInfos;
   }
 
   private static boolean isCatalogTable(final byte [] tableName) {
@@ -957,15 +1023,30 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
       cpHost.preDeleteTable(tableName);
     }
     this.executorService.submit(new DeleteTableHandler(tableName, this, this));
+
     if (cpHost != null) {
       cpHost.postDeleteTable(tableName);
     }
   }
 
+  /**
+   * Get the number of regions of the table that have been updated by the alter.
+   *
+   * @return Pair indicating the number of regions updated Pair.getFirst is the
+   *         regions that are yet to be updated Pair.getSecond is the total number
+   *         of regions of the table
+   */
+  public Pair<Integer, Integer> getAlterStatus(byte[] tableName)
+  throws IOException {
+    return this.assignmentManager.getReopenStatus(tableName);
+  }
+
   public void addColumn(byte [] tableName, HColumnDescriptor column)
   throws IOException {
     if (cpHost != null) {
-      cpHost.preAddColumn(tableName, column);
+      if (cpHost.preAddColumn(tableName, column)) {
+        return;
+      }
     }
     new TableAddFamilyHandler(tableName, column, this, this).process();
     if (cpHost != null) {
@@ -976,7 +1057,9 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
   public void modifyColumn(byte [] tableName, HColumnDescriptor descriptor)
   throws IOException {
     if (cpHost != null) {
-      cpHost.preModifyColumn(tableName, descriptor);
+      if (cpHost.preModifyColumn(tableName, descriptor)) {
+        return;
+      }
     }
     new TableModifyFamilyHandler(tableName, descriptor, this, this).process();
     if (cpHost != null) {
@@ -987,7 +1070,9 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
   public void deleteColumn(final byte [] tableName, final byte [] c)
   throws IOException {
     if (cpHost != null) {
-      cpHost.preDeleteColumn(tableName, c);
+      if (cpHost.preDeleteColumn(tableName, c)) {
+        return;
+      }
     }
     new TableDeleteFamilyHandler(tableName, c, this, this).process();
     if (cpHost != null) {
@@ -1000,7 +1085,8 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
       cpHost.preEnableTable(tableName);
     }
     this.executorService.submit(new EnableTableHandler(this, tableName,
-      catalogTracker, assignmentManager));
+      catalogTracker, assignmentManager, false));
+
     if (cpHost != null) {
       cpHost.postEnableTable(tableName);
     }
@@ -1011,7 +1097,8 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
       cpHost.preDisableTable(tableName);
     }
     this.executorService.submit(new DisableTableHandler(this, tableName,
-      catalogTracker, assignmentManager));
+      catalogTracker, assignmentManager, false));
+
     if (cpHost != null) {
       cpHost.postDisableTable(tableName);
     }
@@ -1040,7 +1127,7 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
           if (pair == null) {
             return false;
           }
-          if (!Bytes.equals(pair.getFirst().getTableDesc().getName(), tableName)) {
+          if (!Bytes.equals(pair.getFirst().getTableName(), tableName)) {
             return false;
           }
           result.set(pair);
@@ -1058,7 +1145,10 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     if (cpHost != null) {
       cpHost.preModifyTable(tableName, htd);
     }
-    this.executorService.submit(new ModifyTableHandler(tableName, htd, this, this));
+
+    this.executorService.submit(new ModifyTableHandler(tableName, htd, this,
+      this));
+
     if (cpHost != null) {
       cpHost.postModifyTable(tableName, htd);
     }
@@ -1100,8 +1190,25 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     return fileSystemManager.getClusterId();
   }
 
+  /**
+   * The set of loaded coprocessors is stored in a static set. Since it's
+   * statically allocated, it does not require that HMaster's cpHost be
+   * initialized prior to accessing it.
+   * @return a String representation of the set of names of the loaded
+   * coprocessors.
+   */
+  public static String getLoadedCoprocessors() {
+    return CoprocessorHost.getLoadedCoprocessors().toString();
+  }
+
   @Override
   public void abort(final String msg, final Throwable t) {
+    if (cpHost != null) {
+      // HBASE-4014: dump a list of loaded coprocessors.
+      LOG.fatal("Master server abort: loaded coprocessors are: " +
+          getLoadedCoprocessors());
+    }
+
     if (abortNow(msg, t)) {
       if (t != null) LOG.fatal(msg, t);
       else LOG.fatal(msg);
@@ -1126,7 +1233,7 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
   private boolean tryRecoveringExpiredZKSession() throws InterruptedException,
       IOException, KeeperException {
     this.zooKeeper = new ZooKeeperWatcher(conf, MASTER + ":"
-        + this.serverName.getPort(), this);
+        + this.serverName.getPort(), this, true);
 
     MonitoredTask status = 
       TaskMonitor.get().createStatus("Recovering expired ZK session");
@@ -1138,6 +1245,8 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
       // Update in-memory structures to reflect our earlier Root/Meta assignment.
       assignRootAndMeta(status);
       // process RIT if any
+      // TODO: Why does this not call AssignmentManager.joinCluster?  Otherwise
+      // we are not processing dead servers if any.
       this.assignmentManager.processRegionsInTransition();
       return true;
     } finally {
@@ -1194,6 +1303,10 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
   public AssignmentManager getAssignmentManager() {
     return this.assignmentManager;
   }
+  
+  public MemoryBoundedLogMessageBuffer getRegionServerFatalLogBuffer() {
+    return rsFatals;
+  }
 
   @Override
   public void shutdown() {
@@ -1204,6 +1317,7 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
         LOG.error("Error call master coprocessor preShutdown()", ioe);
       }
     }
+    this.assignmentManager.shutdown();
     this.serverManager.shutdownCluster();
     try {
       this.clusterStatusTracker.setClusterDown();
@@ -1239,6 +1353,11 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
     return this.stopped;
   }
 
+  public boolean isAborted() {
+    return this.abort;
+  }
+  
+  
   /**
    * Report whether this master is currently the active master or not.
    * If not active master, we are parked on ZK waiting to become active.
@@ -1263,23 +1382,31 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
   public boolean isInitialized() {
     return initialized;
   }
+  
+  @Override
+  @Deprecated
+  public void assign(final byte[] regionName, final boolean force)
+      throws IOException {
+    assign(regionName);
+  }
 
   @Override
-  public void assign(final byte [] regionName, final boolean force)
-  throws IOException {
-    if (cpHost != null) {
-      if (cpHost.preAssign(regionName, force)) {
-        return;
-      }
-    }
+  public void assign(final byte [] regionName)throws IOException {
     Pair<HRegionInfo, ServerName> pair =
       MetaReader.getRegion(this.catalogTracker, regionName);
     if (pair == null) throw new UnknownRegionException(Bytes.toString(regionName));
+    if (cpHost != null) {
+      if (cpHost.preAssign(pair.getFirst())) {
+        return;
+      }
+    }
     assignRegion(pair.getFirst());
     if (cpHost != null) {
       cpHost.postAssign(pair.getFirst());
     }
   }
+  
+  
 
   public void assignRegion(HRegionInfo hri) {
     assignmentManager.assign(hri, true);
@@ -1288,20 +1415,60 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
   @Override
   public void unassign(final byte [] regionName, final boolean force)
   throws IOException {
+    Pair<HRegionInfo, ServerName> pair =
+      MetaReader.getRegion(this.catalogTracker, regionName);
+    if (pair == null) throw new UnknownRegionException(Bytes.toString(regionName));
+    HRegionInfo hri = pair.getFirst();
     if (cpHost != null) {
-      if (cpHost.preUnassign(regionName, force)) {
+      if (cpHost.preUnassign(hri, force)) {
         return;
       }
     }
-    Pair<HRegionInfo, ServerName> pair =
-      MetaReader.getRegion(this.catalogTracker, regionName);
-    if (pair == null) throw new UnknownRegionException(Bytes.toStringBinary(regionName));
-    HRegionInfo hri = pair.getFirst();
-    if (force) this.assignmentManager.clearRegionFromTransition(hri);
-    this.assignmentManager.unassign(hri, force);
+    if (force) {
+      this.assignmentManager.clearRegionFromTransition(hri);
+      assignRegion(hri);
+    } else {
+      this.assignmentManager.unassign(hri, force);
+    }
     if (cpHost != null) {
       cpHost.postUnassign(hri, force);
     }
+  }
+
+  /**
+   * Get HTD array for given tables 
+   * @param tableNames
+   * @return HTableDescriptor[]
+   */
+  public HTableDescriptor[] getHTableDescriptors(List<String> tableNames) {
+    List<HTableDescriptor> list =
+      new ArrayList<HTableDescriptor>(tableNames.size());
+    for (String s: tableNames) {
+      HTableDescriptor htd = null;
+      try {
+        htd = this.tableDescriptors.get(s);
+      } catch (IOException e) {
+        LOG.warn("Failed getting descriptor for " + s, e);
+      }
+      if (htd == null) continue;
+      list.add(htd);
+    }
+    return list.toArray(new HTableDescriptor [] {});
+  }
+
+  /**
+   * Get all table descriptors
+   * @return All descriptors or null if none.
+   */
+  public HTableDescriptor [] getHTableDescriptors() {
+    Map<String, HTableDescriptor> descriptors = null;
+    try {
+      descriptors = this.tableDescriptors.getAll();
+    } catch (IOException e) {
+      LOG.warn("Failed getting all descriptors", e);
+    }
+    return descriptors == null?
+      null: descriptors.values().toArray(new HTableDescriptor [] {});
   }
 
   /**
@@ -1343,6 +1510,7 @@ implements HMasterInterface, HMasterRegionInterface, MasterServices, Server {
    * @see org.apache.hadoop.hbase.master.HMasterCommandLine
    */
   public static void main(String [] args) throws Exception {
+	VersionInfo.logVersion();
     new HMasterCommandLine(HMaster.class).doMain(args);
   }
 }

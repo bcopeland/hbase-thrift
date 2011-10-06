@@ -136,6 +136,12 @@ public interface HTableInterface {
    * @param family Column family to include in the {@link Result}.
    * @throws IOException if a remote or network exception occurs.
    * @since 0.20.0
+   * 
+   * @deprecated As of version 0.92 this method is deprecated without
+   * replacement.   
+   * getRowOrBefore is used internally to find entries in .META. and makes
+   * various assumptions about the table (which are true for .META. but not
+   * in general) to be efficient.
    */
   Result getRowOrBefore(byte[] row, byte[] family) throws IOException;
 
@@ -188,6 +194,11 @@ public interface HTableInterface {
    * <p>
    * If {@link #isAutoFlush isAutoFlush} is false, the update is buffered
    * until the internal buffer is full.
+   * <p>
+   * This can be used for group commit, or for submitting user defined
+   * batches.  The writeBuffer will be periodically inspected while the List
+   * is processed, so depending on the List size the writeBuffer may flush
+   * not at all, or more than once.
    * @param puts The list of mutations to apply. The batch put is done by
    * aggregating the iteration of the Puts over the write buffer
    * at the client-side for a single RPC call.

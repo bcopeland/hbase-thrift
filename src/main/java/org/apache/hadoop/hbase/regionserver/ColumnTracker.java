@@ -19,10 +19,14 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import java.io.IOException;
+
+import org.apache.hadoop.hbase.regionserver.ScanQueryMatcher.MatchCode;
+
 /**
  * Implementing classes of this interface will be used for the tracking
- * and enforcement of columns and numbers of versions during the course of a
- * Get or Scan operation.
+ * and enforcement of columns and numbers of versions and timeToLive during
+ * the course of a Get or Scan operation.
  * <p>
  * Currently there are two different types of Store/Family-level queries.
  * <ul><li>{@link ExplicitColumnTracker} is used when the query specifies
@@ -42,11 +46,13 @@ public interface ColumnTracker {
    * @param bytes
    * @param offset
    * @param length
-   * @param timestamp
+   * @param ttl The timeToLive to enforce.
    * @return The match code instance.
+   * @throws IOException in case there is an internal consistency problem
+   *      caused by a data corruption.
    */
   public ScanQueryMatcher.MatchCode checkColumn(byte [] bytes, int offset,
-      int length, long timestamp);
+      int length, long ttl) throws IOException;
 
   /**
    * Updates internal variables in between files
@@ -76,4 +82,19 @@ public interface ColumnTracker {
    * @return null, or a ColumnCount that we should seek to
    */
   public ColumnCount getColumnHint();
+
+  /**
+   * Retrieve the MatchCode for the next row or column
+   */
+  public MatchCode getNextRowOrNextColumn(byte[] bytes, int offset,
+      int qualLength);
+
+  /**
+   * Give the tracker a chance to declare it's done based on only the timestamp
+   * to allow an early out.
+   *
+   * @param timestamp
+   * @return <code>true</code> to early out based on timestamp.
+   */
+  public boolean isDone(long timestamp);
 }

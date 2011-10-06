@@ -49,6 +49,8 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -188,31 +190,6 @@ public class TestZKBasedOpenCloseRegion {
     }
   }
 
-  @Test (timeout=300000) public void testCloseRegion()
-  throws Exception {
-    LOG.info("Running testCloseRegion");
-    MiniHBaseCluster cluster = TEST_UTIL.getHBaseCluster();
-    LOG.info("Number of region servers = " + cluster.getLiveRegionServerThreads().size());
-
-    int rsIdx = 0;
-    HRegionServer regionServer = TEST_UTIL.getHBaseCluster().getRegionServer(rsIdx);
-    HRegionInfo hri = getNonMetaRegion(regionServer.getOnlineRegions());
-    LOG.debug("Asking RS to close region " + hri.getRegionNameAsString());
-
-    AtomicBoolean closeEventProcessed = new AtomicBoolean(false);
-    EventHandlerListener listener =
-      new CloseRegionEventListener(hri.getRegionNameAsString(),
-          closeEventProcessed);
-    cluster.getMaster().executorService.registerListener(EventType.RS_ZK_REGION_CLOSED, listener);
-
-    cluster.getMaster().assignmentManager.unassign(hri);
-
-    while (!closeEventProcessed.get()) {
-      Threads.sleep(100);
-    }
-    LOG.info("Done with testCloseRegion");
-  }
-
   public static class CloseRegionEventListener implements EventHandlerListener {
     private static final Log LOG = LogFactory.getLog(CloseRegionEventListener.class);
     String regionToClose;
@@ -264,7 +241,7 @@ public class TestZKBasedOpenCloseRegion {
     HRegionInfo hri = getNonMetaRegion(hr0.getOnlineRegions());
 
     // fake that hr1 is processing the region
-    hr1.getRegionsInTransitionInRS().add(hri.getEncodedNameAsBytes());
+    hr1.getRegionsInTransitionInRS().putIfAbsent(hri.getEncodedNameAsBytes(), true);
 
     AtomicBoolean reopenEventProcessed = new AtomicBoolean(false);
     EventHandlerListener openListener =
@@ -277,28 +254,58 @@ public class TestZKBasedOpenCloseRegion {
     TEST_UTIL.getHBaseAdmin().move(hri.getEncodedNameAsBytes(),
         Bytes.toBytes(hr1.getServerName().toString()));
 
-    while (!reopenEventProcessed.get()) {
-      Threads.sleep(100);
-    }
-
     // make sure the region came back
-    assertTrue(hr1.getOnlineRegion(hri.getEncodedNameAsBytes()) == null);
+    assertEquals(hr1.getOnlineRegion(hri.getEncodedNameAsBytes()), null);
 
     // remove the block and reset the boolean
     hr1.getRegionsInTransitionInRS().remove(hri.getEncodedNameAsBytes());
     reopenEventProcessed.set(false);
+    
+    // now try moving a region when there is no region in transition.
+    hri = getNonMetaRegion(hr1.getOnlineRegions());
 
-    // move the region again, but this time it will work
+    openListener =
+      new ReopenEventListener(hri.getRegionNameAsString(),
+          reopenEventProcessed, EventType.RS_ZK_REGION_OPENED);
+
+    cluster.getMaster().executorService.
+      registerListener(EventType.RS_ZK_REGION_OPENED, openListener);
+    
     TEST_UTIL.getHBaseAdmin().move(hri.getEncodedNameAsBytes(),
-        Bytes.toBytes(hr1.getServerName().toString()));
+        Bytes.toBytes(hr0.getServerName().toString()));
 
     while (!reopenEventProcessed.get()) {
       Threads.sleep(100);
     }
 
     // make sure the region has moved from the original RS
-    assertTrue(hr0.getOnlineRegion(hri.getEncodedNameAsBytes()) == null);
+    assertTrue(hr1.getOnlineRegion(hri.getEncodedNameAsBytes()) == null);
 
+  }
+
+  @Test (timeout=300000) public void testCloseRegion()
+  throws Exception {
+    LOG.info("Running testCloseRegion");
+    MiniHBaseCluster cluster = TEST_UTIL.getHBaseCluster();
+    LOG.info("Number of region servers = " + cluster.getLiveRegionServerThreads().size());
+
+    int rsIdx = 0;
+    HRegionServer regionServer = TEST_UTIL.getHBaseCluster().getRegionServer(rsIdx);
+    HRegionInfo hri = getNonMetaRegion(regionServer.getOnlineRegions());
+    LOG.debug("Asking RS to close region " + hri.getRegionNameAsString());
+
+    AtomicBoolean closeEventProcessed = new AtomicBoolean(false);
+    EventHandlerListener listener =
+      new CloseRegionEventListener(hri.getRegionNameAsString(),
+          closeEventProcessed);
+    cluster.getMaster().executorService.registerListener(EventType.RS_ZK_REGION_CLOSED, listener);
+
+    cluster.getMaster().assignmentManager.unassign(hri);
+
+    while (!closeEventProcessed.get()) {
+      Threads.sleep(100);
+    }
+    LOG.info("Done with testCloseRegion");
   }
 
   private static void waitUntilAllRegionsAssigned()

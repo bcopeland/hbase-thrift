@@ -37,6 +37,7 @@ import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.io.hfile.Compression;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFileScanner;
+import org.apache.hadoop.hbase.regionserver.StoreFile.BloomType;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Test;
 
@@ -70,7 +71,7 @@ public class TestLoadIncrementalHFiles {
    */
   @Test
   public void testSimpleLoad() throws Exception {
-    runTest("testSimpleLoad",
+    runTest("testSimpleLoad", BloomType.NONE,
         new byte[][][] {
           new byte[][]{ Bytes.toBytes("aaaa"), Bytes.toBytes("cccc") },
           new byte[][]{ Bytes.toBytes("ddd"), Bytes.toBytes("ooo") },
@@ -83,15 +84,39 @@ public class TestLoadIncrementalHFiles {
    */
   @Test
   public void testRegionCrossingLoad() throws Exception {
-    runTest("testRegionCrossingLoad",
+    runTest("testRegionCrossingLoad", BloomType.NONE,
         new byte[][][] {
           new byte[][]{ Bytes.toBytes("aaaa"), Bytes.toBytes("eee") },
           new byte[][]{ Bytes.toBytes("fff"), Bytes.toBytes("zzz") },
     });
   }
 
-  private void runTest(String testName, byte[][][] hfileRanges)
-  throws Exception {
+  /**
+   * Test loading into a column family that has a ROW bloom filter.
+   */
+  @Test
+  public void testRegionCrossingRowBloom() throws Exception {
+    runTest("testRegionCrossingLoadRowBloom", BloomType.ROW,
+        new byte[][][] {
+          new byte[][]{ Bytes.toBytes("aaaa"), Bytes.toBytes("eee") },
+          new byte[][]{ Bytes.toBytes("fff"), Bytes.toBytes("zzz") },
+    });
+  }
+  
+  /**
+   * Test loading into a column family that has a ROWCOL bloom filter.
+   */
+  @Test
+  public void testRegionCrossingRowColBloom() throws Exception {
+    runTest("testRegionCrossingLoadRowColBloom", BloomType.ROWCOL,
+        new byte[][][] {
+          new byte[][]{ Bytes.toBytes("aaaa"), Bytes.toBytes("eee") },
+          new byte[][]{ Bytes.toBytes("fff"), Bytes.toBytes("zzz") },
+    });
+  }
+
+  private void runTest(String testName, BloomType bloomType, 
+          byte[][][] hfileRanges) throws Exception {
     Path dir = HBaseTestingUtility.getTestDir(testName);
     FileSystem fs = util.getTestFileSystem();
     dir = dir.makeQualified(fs);
@@ -101,8 +126,8 @@ public class TestLoadIncrementalHFiles {
     for (byte[][] range : hfileRanges) {
       byte[] from = range[0];
       byte[] to = range[1];
-      createHFile(fs, new Path(familyDir, "hfile_" + hfileIdx++),
-          FAMILY, QUALIFIER, from, to, 1000);
+      createHFile(util.getConfiguration(), fs, new Path(familyDir, "hfile_"
+          + hfileIdx++), FAMILY, QUALIFIER, from, to, 1000);
     }
     int expectedRows = hfileIdx * 1000;
 
@@ -111,7 +136,9 @@ public class TestLoadIncrementalHFiles {
     try {
       HBaseAdmin admin = new HBaseAdmin(util.getConfiguration());
       HTableDescriptor htd = new HTableDescriptor(TABLE);
-      htd.addFamily(new HColumnDescriptor(FAMILY));
+      HColumnDescriptor familyDesc = new HColumnDescriptor(FAMILY);
+      familyDesc.setBloomFilterType(bloomType);
+      htd.addFamily(familyDesc);
       admin.createTable(htd, SPLIT_KEYS);
 
       HTable table = new HTable(util.getConfiguration(), TABLE);
@@ -132,7 +159,7 @@ public class TestLoadIncrementalHFiles {
     FileSystem fs = util.getTestFileSystem();
     Path testIn = new Path(dir, "testhfile");
     HColumnDescriptor familyDesc = new HColumnDescriptor(FAMILY);
-    createHFile(fs, testIn, FAMILY, QUALIFIER,
+    createHFile(util.getConfiguration(), fs, testIn, FAMILY, QUALIFIER,
         Bytes.toBytes("aaa"), Bytes.toBytes("zzz"), 1000);
 
     Path bottomOut = new Path(dir, "bottom.out");
@@ -151,7 +178,7 @@ public class TestLoadIncrementalHFiles {
 
   private int verifyHFile(Path p) throws IOException {
     Configuration conf = util.getConfiguration();
-    HFile.Reader reader = new HFile.Reader(
+    HFile.Reader reader = HFile.createReader(
         p.getFileSystem(conf), p, null, false, false);
     reader.loadFileInfo();
     HFileScanner scanner = reader.getScanner(false, false);
@@ -171,11 +198,13 @@ public class TestLoadIncrementalHFiles {
    * TODO put me in an HFileTestUtil or something?
    */
   static void createHFile(
+      Configuration conf,
       FileSystem fs, Path path,
       byte[] family, byte[] qualifier,
       byte[] startKey, byte[] endKey, int numRows) throws IOException
   {
-    HFile.Writer writer = new HFile.Writer(fs, path, BLOCKSIZE, COMPRESSION,
+    HFile.Writer writer = HFile.getWriterFactory(conf).createWriter(fs, path,
+        BLOCKSIZE, COMPRESSION,
         KeyValue.KEY_COMPARATOR);
     long now = System.currentTimeMillis();
     try {

@@ -23,9 +23,9 @@ package org.apache.hadoop.hbase.regionserver.wal;
 
 import java.io.IOException;
 
+import org.apache.hadoop.hbase.Coprocessor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.coprocessor.*;
-import org.apache.hadoop.hbase.coprocessor.Coprocessor.Priority;
 import org.apache.hadoop.conf.Configuration;
 
 /**
@@ -53,11 +53,13 @@ public class WALCoprocessorHost
      * @param impl the coprocessor instance
      * @param priority chaining priority
      * @param seq load sequence
+     * @param conf configuration
      * @param hlog HLog
      */
     public WALEnvironment(Class<?> implClass, final Coprocessor impl,
-        final Coprocessor.Priority priority, final int seq, final HLog hlog) {
-      super(impl, priority, seq);
+        final int priority, final int seq, final Configuration conf,
+        final HLog hlog) {
+      super(impl, priority, seq, conf);
       this.wal = hlog;
     }
   }
@@ -75,10 +77,11 @@ public class WALCoprocessorHost
   }
 
   @Override
-  public WALEnvironment createEnvironment(Class<?> implClass,
-      Coprocessor instance, Priority priority, int seq) {
-    // TODO Auto-generated method stub
-    return new WALEnvironment(implClass, instance, priority, seq, this.wal);
+  public WALEnvironment createEnvironment(final Class<?> implClass,
+      final Coprocessor instance, final int priority, final int seq,
+      final Configuration conf) {
+    return new WALEnvironment(implClass, instance, priority, seq, conf,
+        this.wal);
   }
 
   /**

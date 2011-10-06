@@ -42,9 +42,12 @@ import org.apache.hadoop.hbase.client.coprocessor.Exec;
 import org.apache.hadoop.hbase.client.coprocessor.ExecResult;
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
 import org.apache.hadoop.hbase.filter.WritableByteArrayComparable;
+import org.apache.hadoop.hbase.io.hfile.BlockCacheColumnFamilySummary;
+import org.apache.hadoop.hbase.regionserver.RegionOpeningState;
+import org.apache.hadoop.hbase.regionserver.wal.FailedLogCloseException;
 import org.apache.hadoop.hbase.regionserver.wal.HLog;
 import org.apache.hadoop.ipc.RemoteException;
-import org.apache.hadoop.ipc.VersionedProtocol;
+import org.apache.hadoop.hbase.ipc.VersionedProtocol;
 
 /**
  * Clients interact with HRegionServers using a handle to the HRegionInterface.
@@ -288,7 +291,7 @@ public interface HRegionInterface extends VersionedProtocol, Stoppable, Abortabl
    * @return All regions online on this region server
    * @throws IOException e
    */
-  public List<HRegionInfo> getOnlineRegions();
+  public List<HRegionInfo> getOnlineRegions() throws IOException;
 
   /**
    * Method used when a master is taking the place of another failed one.
@@ -326,11 +329,34 @@ public interface HRegionInterface extends VersionedProtocol, Stoppable, Abortabl
 
   /**
    * Opens the specified region.
-   * @param region region to open
+   * 
+   * @param region
+   *          region to open
+   * @return RegionOpeningState 
+   *         OPENED         - if region open request was successful.
+   *         ALREADY_OPENED - if the region was already opened. 
+   *         FAILED_OPENING - if region opening failed.
+   *
    * @throws IOException
    */
-  public void openRegion(final HRegionInfo region) throws IOException;
+  public RegionOpeningState openRegion(final HRegionInfo region) throws IOException;
 
+  /**
+   * Opens the specified region.
+   * @param region
+   *          region to open
+   * @param versionOfOfflineNode
+   *          the version of znode to compare when RS transitions the znode from
+   *          OFFLINE state.
+   * @return RegionOpeningState 
+   *         OPENED         - if region open request was successful.
+   *         ALREADY_OPENED - if the region was already opened. 
+   *         FAILED_OPENING - if region opening failed.
+   * @throws IOException
+   */
+  public RegionOpeningState openRegion(HRegionInfo region, int versionOfOfflineNode)
+      throws IOException;
+  
   /**
    * Opens the specified regions.
    * @param regions regions to open
@@ -357,6 +383,21 @@ public interface HRegionInterface extends VersionedProtocol, Stoppable, Abortabl
    */
   public boolean closeRegion(final HRegionInfo region, final boolean zk)
   throws IOException;
+  
+  /**
+   * Closes the region in the RS with the specified encoded regionName and will
+   * use or not use ZK during the close according to the specified flag. Note
+   * that the encoded region name is in byte format.
+   * 
+   * @param encodedRegionName
+   *          in bytes
+   * @param zk
+   *          true if to use zookeeper, false if need not.
+   * @return true if region is closed, false if not.
+   * @throws IOException
+   */
+  public boolean closeRegion(byte[] encodedRegionName, final boolean zk)
+      throws IOException;
 
   // Region administrative methods
 
@@ -479,4 +520,24 @@ public interface HRegionInterface extends VersionedProtocol, Stoppable, Abortabl
      final byte[] family, final byte[] qualifier, final CompareOp compareOp,
      final WritableByteArrayComparable comparator, final Delete delete)
      throws IOException;
+  
+  /**
+   * Performs a BlockCache summary and returns a List of BlockCacheColumnFamilySummary objects.
+   * This method could be fairly heavyweight in that it evaluates the entire HBase file-system
+   * against what is in the RegionServer BlockCache. 
+   * 
+   * @return BlockCacheColumnFamilySummary
+   * @throws IOException exception
+   */
+  public List<BlockCacheColumnFamilySummary> getBlockCacheColumnFamilySummaries() throws IOException;
+  /**
+   * Roll the log writer. That is, start writing log messages to a new file.
+   * 
+   * @throws IOException
+   * @throws FailedLogCloseException
+   * @return If lots of logs, flush the returned regions so next time through
+   * we can clean logs. Returns null if nothing to flush.  Names are actual
+   * region names as returned by {@link HRegionInfo#getEncodedName()} 
+   */
+  public byte[][] rollHLogWriter() throws IOException, FailedLogCloseException;
 }

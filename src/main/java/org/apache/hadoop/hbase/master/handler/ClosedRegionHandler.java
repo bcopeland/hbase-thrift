@@ -92,12 +92,13 @@ public class ClosedRegionHandler extends EventHandler implements TotesHRegionInf
     LOG.debug("Handling CLOSED event for " + regionInfo.getEncodedName());
     // Check if this table is being disabled or not
     if (this.assignmentManager.getZKTable().
-        isDisablingOrDisabledTable(this.regionInfo.getTableDesc().getNameAsString())) {
+        isDisablingOrDisabledTable(this.regionInfo.getTableNameAsString())) {
       assignmentManager.offlineDisabledRegion(regionInfo);
       return;
     }
     // ZK Node is in CLOSED state, assign it.
     assignmentManager.setOffline(regionInfo);
+    assignmentManager.removeClosedRegion(regionInfo);
     assignmentManager.assign(regionInfo, true);
   }
 }

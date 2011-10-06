@@ -19,23 +19,31 @@
  */
 package org.apache.hadoop.hbase.util;
 
-import org.apache.hadoop.hbase.HConstants;
-import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.io.RawComparator;
-import org.apache.hadoop.io.WritableComparator;
-import org.apache.hadoop.io.WritableUtils;
-
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Field;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.Comparator;
 import java.util.Iterator;
-import java.math.BigDecimal;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
+import org.apache.hadoop.io.RawComparator;
+import org.apache.hadoop.io.WritableComparator;
+import org.apache.hadoop.io.WritableUtils;
+
+import sun.misc.Unsafe;
+
+import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Utility class that handles byte arrays, conversions to/from other types,
@@ -109,7 +117,8 @@ public class Bytes {
       return compareTo(left, right);
     }
     public int compare(byte [] b1, int s1, int l1, byte [] b2, int s2, int l2) {
-      return compareTo(b1, s1, l1, b2, s2, l2);
+      return LexicographicalComparerHolder.BEST_COMPARER.
+        compareTo(b1, s1, l1, b2, s2, l2);
     }
   }
 
@@ -299,7 +308,22 @@ public class Bytes {
    * @see #toStringBinary(byte[], int, int)
    */
   public static String toStringBinary(final byte [] b) {
+    if (b == null)
+      return "null";
     return toStringBinary(b, 0, b.length);
+  }
+  
+  /**
+   * Converts the given byte buffer, from its array offset to its limit, to
+   * a string. The position and the mark are ignored.
+   *
+   * @param buf a byte buffer
+   * @return a string representation of the buffer's binary contents
+   */
+  public static String toStringBinary(ByteBuffer buf) {
+    if (buf == null)
+      return "null";
+    return toStringBinary(buf.array(), buf.arrayOffset(), buf.limit());
   }
 
   /**
@@ -927,11 +951,12 @@ public class Bytes {
    * @return 0 if equal, < 0 if left is less than right, etc.
    */
   public static int compareTo(final byte [] left, final byte [] right) {
-    return compareTo(left, 0, left.length, right, 0, right.length);
+    return LexicographicalComparerHolder.BEST_COMPARER.
+      compareTo(left, 0, left.length, right, 0, right.length);
   }
 
   /**
-   * Lexographically compare two arrays.
+   * Lexicographically compare two arrays.
    *
    * @param buffer1 left operand
    * @param buffer2 right operand
@@ -943,17 +968,199 @@ public class Bytes {
    */
   public static int compareTo(byte[] buffer1, int offset1, int length1,
       byte[] buffer2, int offset2, int length2) {
-    // Bring WritableComparator code local
-    int end1 = offset1 + length1;
-    int end2 = offset2 + length2;
-    for (int i = offset1, j = offset2; i < end1 && j < end2; i++, j++) {
-      int a = (buffer1[i] & 0xff);
-      int b = (buffer2[j] & 0xff);
-      if (a != b) {
-        return a - b;
+    return LexicographicalComparerHolder.BEST_COMPARER.
+      compareTo(buffer1, offset1, length1, buffer2, offset2, length2);
+  }
+  
+  interface Comparer<T> {
+    abstract public int compareTo(T buffer1, int offset1, int length1,
+        T buffer2, int offset2, int length2);
+  }
+
+  @VisibleForTesting
+  static Comparer<byte[]> lexicographicalComparerJavaImpl() {
+    return LexicographicalComparerHolder.PureJavaComparer.INSTANCE;
+  }
+
+  /**
+   * Provides a lexicographical comparer implementation; either a Java
+   * implementation or a faster implementation based on {@link Unsafe}.
+   *
+   * <p>Uses reflection to gracefully fall back to the Java implementation if
+   * {@code Unsafe} isn't available.
+   */
+  @VisibleForTesting
+  static class LexicographicalComparerHolder {
+    static final String UNSAFE_COMPARER_NAME =
+        LexicographicalComparerHolder.class.getName() + "$UnsafeComparer";
+    
+    static final Comparer<byte[]> BEST_COMPARER = getBestComparer();
+    /**
+     * Returns the Unsafe-using Comparer, or falls back to the pure-Java
+     * implementation if unable to do so.
+     */
+    static Comparer<byte[]> getBestComparer() {
+      try {
+        Class<?> theClass = Class.forName(UNSAFE_COMPARER_NAME);
+
+        // yes, UnsafeComparer does implement Comparer<byte[]>
+        @SuppressWarnings("unchecked")
+        Comparer<byte[]> comparer =
+          (Comparer<byte[]>) theClass.getEnumConstants()[0];
+        return comparer;
+      } catch (Throwable t) { // ensure we really catch *everything*
+        return lexicographicalComparerJavaImpl();
       }
     }
-    return length1 - length2;
+    
+    enum PureJavaComparer implements Comparer<byte[]> {
+      INSTANCE;
+
+      @Override
+      public int compareTo(byte[] buffer1, int offset1, int length1,
+          byte[] buffer2, int offset2, int length2) {
+        // Short circuit equal case
+        if (buffer1 == buffer2 &&
+            offset1 == offset2 &&
+            length1 == length2) {
+          return 0;
+        }
+        // Bring WritableComparator code local
+        int end1 = offset1 + length1;
+        int end2 = offset2 + length2;
+        for (int i = offset1, j = offset2; i < end1 && j < end2; i++, j++) {
+          int a = (buffer1[i] & 0xff);
+          int b = (buffer2[j] & 0xff);
+          if (a != b) {
+            return a - b;
+          }
+        }
+        return length1 - length2;
+      }
+    }
+    
+    @VisibleForTesting
+    enum UnsafeComparer implements Comparer<byte[]> {
+      INSTANCE;
+
+      static final Unsafe theUnsafe;
+
+      /** The offset to the first element in a byte array. */
+      static final int BYTE_ARRAY_BASE_OFFSET;
+
+      static {
+        theUnsafe = (Unsafe) AccessController.doPrivileged(
+            new PrivilegedAction<Object>() {
+              @Override
+              public Object run() {
+                try {
+                  Field f = Unsafe.class.getDeclaredField("theUnsafe");
+                  f.setAccessible(true);
+                  return f.get(null);
+                } catch (NoSuchFieldException e) {
+                  // It doesn't matter what we throw;
+                  // it's swallowed in getBestComparer().
+                  throw new Error();
+                } catch (IllegalAccessException e) {
+                  throw new Error();
+                }
+              }
+            });
+
+        BYTE_ARRAY_BASE_OFFSET = theUnsafe.arrayBaseOffset(byte[].class);
+
+        // sanity check - this should never fail
+        if (theUnsafe.arrayIndexScale(byte[].class) != 1) {
+          throw new AssertionError();
+        }
+      }
+
+      static final boolean littleEndian =
+        ByteOrder.nativeOrder().equals(ByteOrder.LITTLE_ENDIAN);
+
+      /**
+       * Returns true if x1 is less than x2, when both values are treated as
+       * unsigned.
+       */
+      static boolean lessThanUnsigned(long x1, long x2) {
+        return (x1 + Long.MIN_VALUE) < (x2 + Long.MIN_VALUE);
+      }
+
+      /**
+       * Lexicographically compare two arrays.
+       *
+       * @param buffer1 left operand
+       * @param buffer2 right operand
+       * @param offset1 Where to start comparing in the left buffer
+       * @param offset2 Where to start comparing in the right buffer
+       * @param length1 How much to compare from the left buffer
+       * @param length2 How much to compare from the right buffer
+       * @return 0 if equal, < 0 if left is less than right, etc.
+       */
+      @Override
+      public int compareTo(byte[] buffer1, int offset1, int length1,
+          byte[] buffer2, int offset2, int length2) {
+        // Short circuit equal case
+        if (buffer1 == buffer2 &&
+            offset1 == offset2 &&
+            length1 == length2) {
+          return 0;
+        }
+        int minLength = Math.min(length1, length2);
+        int minWords = minLength / SIZEOF_LONG;
+        int offset1Adj = offset1 + BYTE_ARRAY_BASE_OFFSET;
+        int offset2Adj = offset2 + BYTE_ARRAY_BASE_OFFSET;
+
+        /*
+         * Compare 8 bytes at a time. Benchmarking shows comparing 8 bytes at a
+         * time is no slower than comparing 4 bytes at a time even on 32-bit.
+         * On the other hand, it is substantially faster on 64-bit.
+         */
+        for (int i = 0; i < minWords * SIZEOF_LONG; i += SIZEOF_LONG) {
+          long lw = theUnsafe.getLong(buffer1, offset1Adj + (long) i);
+          long rw = theUnsafe.getLong(buffer2, offset2Adj + (long) i);
+          long diff = lw ^ rw;
+
+          if (diff != 0) {
+            if (!littleEndian) {
+              return lessThanUnsigned(lw, rw) ? -1 : 1;
+            }
+
+            // Use binary search
+            int n = 0;
+            int y;
+            int x = (int) diff;
+            if (x == 0) {
+              x = (int) (diff >>> 32);
+              n = 32;
+            }
+
+            y = x << 16;
+            if (y == 0) {
+              n += 16;
+            } else {
+              x = y;
+            }
+
+            y = x << 8;
+            if (y == 0) {
+              n += 8;
+            }
+            return (int) (((lw >>> n) & 0xFFL) - ((rw >>> n) & 0xFFL));
+          }
+        }
+
+        // The epilogue to cover the last (minLength % 8) elements.
+        for (int i = minWords * SIZEOF_LONG; i < minLength; i++) {
+          int a = (buffer1[offset1 + i] & 0xff);
+          int b = (buffer2[offset2 + i] & 0xff);
+          if (a != b) {
+            return a - b;
+          }
+        }
+        return length1 - length2;
+      }
+    }
   }
 
   /**
@@ -964,12 +1171,44 @@ public class Bytes {
   public static boolean equals(final byte [] left, final byte [] right) {
     // Could use Arrays.equals?
     //noinspection SimplifiableConditionalExpression
-    if (left == null && right == null) {
+    if (left == right) return true;
+    if (left == null || right == null) return false;
+    if (left.length != right.length) return false;
+    if (left.length == 0) return true;
+    
+    // Since we're often comparing adjacent sorted data,
+    // it's usual to have equal arrays except for the very last byte
+    // so check that first
+    if (left[left.length - 1] != right[right.length - 1]) return false;
+
+    return compareTo(left, right) == 0;
+  }
+  
+  public static boolean equals(final byte[] left, int leftOffset, int leftLen,
+                               final byte[] right, int rightOffset, int rightLen) {
+    // short circuit case
+    if (left == right &&
+        leftOffset == rightOffset &&
+        leftLen == rightLen) {
       return true;
     }
-    return (left == null || right == null || (left.length != right.length)
-            ? false : compareTo(left, right) == 0);
+    // different lengths fast check
+    if (leftLen != rightLen) {
+      return false;
+    }
+    if (leftLen == 0) {
+      return true;
+    }
+    
+    // Since we're often comparing adjacent sorted data,
+    // it's usual to have equal arrays except for the very last byte
+    // so check that first
+    if (left[leftOffset + leftLen - 1] != right[rightOffset + rightLen - 1]) return false;
+
+    return LexicographicalComparerHolder.BEST_COMPARER.
+      compareTo(left, leftOffset, leftLen, right, rightOffset, rightLen) == 0;
   }
+  
 
   /**
    * Return true if the byte array on the right is a prefix of the byte
@@ -978,7 +1217,8 @@ public class Bytes {
   public static boolean startsWith(byte[] bytes, byte[] prefix) {
     return bytes != null && prefix != null &&
       bytes.length >= prefix.length &&
-      compareTo(bytes, 0, prefix.length, prefix, 0, prefix.length) == 0;      
+      LexicographicalComparerHolder.BEST_COMPARER.
+        compareTo(bytes, 0, prefix.length, prefix, 0, prefix.length) == 0;      
   }
 
   /**
@@ -1230,12 +1470,18 @@ public class Bytes {
 
   /**
    * Binary search for keys in indexes.
+   *
    * @param arr array of byte arrays to search for
    * @param key the key you want to find
    * @param offset the offset in the key you want to find
    * @param length the length of the key
    * @param comparator a comparator to compare.
-   * @return index of key
+   * @return zero-based index of the key, if the key is present in the array.
+   *         Otherwise, a value -(i + 1) such that the key is between arr[i -
+   *         1] and arr[i] non-inclusively, where i is in [0, i], if we define
+   *         arr[-1] = -Inf and arr[N] = Inf for an N-element array. The above
+   *         means that this function can return 2N + 1 different values
+   *         ranging from -(N + 1) to N - 1.
    */
   public static int binarySearch(byte [][]arr, byte []key, int offset,
       int length, RawComparator<byte []> comparator) {
@@ -1342,6 +1588,36 @@ public class Bytes {
       if (amo == 0) return value;
     }
     return value;
+  }
+
+  /**
+   * Writes a string as a fixed-size field, padded with zeros.
+   */
+  public static void writeStringFixedSize(final DataOutput out, String s,
+      int size) throws IOException {
+    byte[] b = toBytes(s);
+    if (b.length > size) {
+      throw new IOException("Trying to write " + b.length + " bytes (" +
+          toStringBinary(b) + ") into a field of length " + size);
+    }
+
+    out.writeBytes(s);
+    for (int i = 0; i < size - s.length(); ++i)
+      out.writeByte(0);
+  }
+
+  /**
+   * Reads a fixed-size field and interprets it as a string padded with zeros.
+   */
+  public static String readStringFixedSize(final DataInput in, int size) 
+      throws IOException {
+    byte[] b = new byte[size];
+    in.readFully(b);
+    int n = b.length;
+    while (n > 0 && b[n - 1] == 0)
+      --n;
+
+    return toString(b, 0, n);
   }
 
 }

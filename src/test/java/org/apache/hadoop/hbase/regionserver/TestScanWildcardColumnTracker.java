@@ -20,6 +20,7 @@
 
 package org.apache.hadoop.hbase.regionserver;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,9 +32,9 @@ public class TestScanWildcardColumnTracker extends HBaseTestCase {
 
   final static int VERSIONS = 2;
 
-  public void testCheckColumn_Ok() {
+  public void testCheckColumn_Ok() throws IOException {
     ScanWildcardColumnTracker tracker =
-      new ScanWildcardColumnTracker(VERSIONS);
+      new ScanWildcardColumnTracker(0, VERSIONS, Long.MAX_VALUE);
 
     //Create list of qualifiers
     List<byte[]> qualifiers = new ArrayList<byte[]>();
@@ -63,9 +64,9 @@ public class TestScanWildcardColumnTracker extends HBaseTestCase {
     }
   }
 
-  public void testCheckColumn_EnforceVersions() {
+  public void testCheckColumn_EnforceVersions() throws IOException {
     ScanWildcardColumnTracker tracker =
-      new ScanWildcardColumnTracker(VERSIONS);
+      new ScanWildcardColumnTracker(0, VERSIONS, Long.MAX_VALUE);
 
     //Create list of qualifiers
     List<byte[]> qualifiers = new ArrayList<byte[]>();
@@ -98,7 +99,7 @@ public class TestScanWildcardColumnTracker extends HBaseTestCase {
 
   public void DisabledTestCheckColumn_WrongOrder() {
     ScanWildcardColumnTracker tracker =
-      new ScanWildcardColumnTracker(VERSIONS);
+      new ScanWildcardColumnTracker(0, VERSIONS, Long.MAX_VALUE);
 
     //Create list of qualifiers
     List<byte[]> qualifiers = new ArrayList<byte[]>();

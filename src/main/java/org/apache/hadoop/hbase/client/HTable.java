@@ -1,5 +1,5 @@
 /**
- * Copyright 2010 The Apache Software Foundation
+ * Copyright 2011 The Apache Software Foundation
  *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -56,19 +56,30 @@ import org.apache.hadoop.hbase.UnknownScannerException;
 import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.client.HConnectionManager.HConnectable;
 import org.apache.hadoop.hbase.client.MetaScanner.MetaScannerVisitor;
+import org.apache.hadoop.hbase.client.metrics.ScanMetrics;
 import org.apache.hadoop.hbase.client.coprocessor.Batch;
 import org.apache.hadoop.hbase.ipc.CoprocessorProtocol;
 import org.apache.hadoop.hbase.ipc.ExecRPCInvoker;
+import org.apache.hadoop.hbase.regionserver.RegionServerStoppedException;
 import org.apache.hadoop.hbase.util.Addressing;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.Writables;
+import org.apache.hadoop.io.DataOutputBuffer;
 
 /**
- * Used to communicate with a single HBase table.
+ * <p>Used to communicate with a single HBase table.
  *
- * This class is not thread safe for updates; the underlying write buffer can
+ * <p>This class is not thread safe for reads nor write.
+ * 
+ * <p>In case of writes (Put, Delete), the underlying write buffer can
  * be corrupted if multiple threads contend over a single HTable instance.
+ * 
+ * <p>In case of reads, some fields used by a Scan are shared among all threads.
+ * The HTable implementation can either not contract to be safe in case of a Get
+ *
+ * <p>To access a table in a multi threaded environment, please consider
+ * using the {@link HTablePool} class to create your HTable instances.
  *
  * <p>Instances of HTable passed the same {@link Configuration} instance will
  * share connections to servers out on the cluster and to the zookeeper ensemble
@@ -90,7 +101,8 @@ import org.apache.hadoop.hbase.util.Writables;
  *
  * <p>Note that this class implements the {@link Closeable} interface. When a
  * HTable instance is no longer required, it *should* be closed in order to ensure
- * that the underlying resources are promptly released.
+ * that the underlying resources are promptly released. Please note that the close 
+ * method can throw java.io.IOException that must be handled.
  *
  * @see HBaseAdmin for create, drop, list, enable and disable of tables.
  * @see HConnection
@@ -104,6 +116,7 @@ public class HTable implements HTableInterface, Closeable {
   private volatile Configuration configuration;
   private final ArrayList<Put> writeBuffer = new ArrayList<Put>();
   private long writeBufferSize;
+  private boolean clearBufferOnFail;
   private boolean autoFlush;
   private long currentWriteBufferSize;
   protected int scannerCaching;
@@ -112,7 +125,8 @@ public class HTable implements HTableInterface, Closeable {
   private long maxScannerResultSize;
   private boolean closed;
   private int operationTimeout;
-
+  private static final int DOPUT_WB_CHECK = 10;    // i.e., doPut checks the writebuffer every X Puts.
+  
   /**
    * Creates an object to access a HBase table.
    * Internally it creates a new instance of {@link Configuration} and a new
@@ -187,6 +201,7 @@ public class HTable implements HTableInterface, Closeable {
     this.configuration = conf;
     this.connection.locateRegion(tableName, HConstants.EMPTY_START_ROW);
     this.writeBufferSize = conf.getLong("hbase.client.write.buffer", 2097152);
+    this.clearBufferOnFail = true;
     this.autoFlush = true;
     this.currentWriteBufferSize = 0;
     this.scannerCaching = conf.getInt("hbase.client.scanner.caching", 1);
@@ -393,7 +408,7 @@ public class HTable implements HTableInterface, Closeable {
           return true;
         }
         HRegionInfo info = Writables.getHRegionInfo(bytes);
-        if (Bytes.equals(info.getTableDesc().getName(), getTableName())) {
+        if (Bytes.equals(info.getTableName(), getTableName())) {
           if (!(info.isOffline() || info.isSplit())) {
             startKeyList.add(info.getStartKey());
             endKeyList.add(info.getEndKey());
@@ -423,7 +438,7 @@ public class HTable implements HTableInterface, Closeable {
             rowResult.getValue(HConstants.CATALOG_FAMILY,
                 HConstants.REGIONINFO_QUALIFIER));
 
-        if (!(Bytes.equals(info.getTableDesc().getName(), getTableName()))) {
+        if (!(Bytes.equals(info.getTableName(), getTableName()))) {
           return false;
         }
 
@@ -704,10 +719,17 @@ public class HTable implements HTableInterface, Closeable {
   }
 
   private void doPut(final List<Put> puts) throws IOException {
+    int n = 0;
     for (Put put : puts) {
       validatePut(put);
       writeBuffer.add(put);
       currentWriteBufferSize += put.heapSize();
+     
+      // we need to periodically see if the writebuffer is full instead of waiting until the end of the List
+      n++;
+      if (n % DOPUT_WB_CHECK == 0 && currentWriteBufferSize > writeBufferSize) {
+        flushCommits();
+      }
     }
     if (autoFlush || currentWriteBufferSize > writeBufferSize) {
       flushCommits();
@@ -833,10 +855,15 @@ public class HTable implements HTableInterface, Closeable {
     try {
       connection.processBatchOfPuts(writeBuffer, tableName, pool);
     } finally {
-      // the write buffer was adjusted by processBatchOfPuts
-      currentWriteBufferSize = 0;
-      for (Put aPut : writeBuffer) {
-        currentWriteBufferSize += aPut.heapSize();
+      if (clearBufferOnFail) {
+        writeBuffer.clear();
+        currentWriteBufferSize = 0;
+      } else {
+        // the write buffer was adjusted by processBatchOfPuts
+        currentWriteBufferSize = 0;
+        for (Put aPut : writeBuffer) {
+          currentWriteBufferSize += aPut.heapSize();
+        }
       }
     }
   }
@@ -916,25 +943,45 @@ public class HTable implements HTableInterface, Closeable {
   }
 
   /**
+   * See {@link #setAutoFlush(boolean, boolean)}
+   *
+   * @param autoFlush
+   *          Whether or not to enable 'auto-flush'.
+   */
+  public void setAutoFlush(boolean autoFlush) {
+    setAutoFlush(autoFlush, autoFlush);
+  }
+
+  /**
    * Turns 'auto-flush' on or off.
    * <p>
    * When enabled (default), {@link Put} operations don't get buffered/delayed
-   * and are immediately executed.  This is slower but safer.
+   * and are immediately executed. Failed operations are not retried. This is
+   * slower but safer.
    * <p>
-   * Turning this off means that multiple {@link Put}s will be accepted before
-   * any RPC is actually sent to do the write operations.  If the application
-   * dies before pending writes get flushed to HBase, data will be lost.
-   * Other side effects may include the fact that the application thinks a
-   * {@link Put} was executed successfully whereas it was in fact only
-   * buffered and the operation may fail when attempting to flush all pending
-   * writes.  In that case though, the code will retry the failed {@link Put}
-   * upon its next attempt to flush the buffer.
+   * Turning off {@link #autoFlush} means that multiple {@link Put}s will be
+   * accepted before any RPC is actually sent to do the write operations. If the
+   * application dies before pending writes get flushed to HBase, data will be
+   * lost.
+   * <p>
+   * When you turn {@link #autoFlush} off, you should also consider the
+   * {@link #clearBufferOnFail} option. By default, asynchronous {@link Put}
+   * requests will be retried on failure until successful. However, this can
+   * pollute the writeBuffer and slow down batching performance. Additionally,
+   * you may want to issue a number of Put requests and call
+   * {@link #flushCommits()} as a barrier. In both use cases, consider setting
+   * clearBufferOnFail to true to erase the buffer after {@link #flushCommits()}
+   * has been called, regardless of success.
    *
-   * @param autoFlush Whether or not to enable 'auto-flush'.
+   * @param autoFlush
+   *          Whether or not to enable 'auto-flush'.
+   * @param clearBufferOnFail
+   *          Whether to keep Put failures in the writeBuffer
    * @see #flushCommits
    */
-  public void setAutoFlush(boolean autoFlush) {
+  public void setAutoFlush(boolean autoFlush, boolean clearBufferOnFail) {
     this.autoFlush = autoFlush;
+    this.clearBufferOnFail = autoFlush || clearBufferOnFail;
   }
 
   /**
@@ -990,6 +1037,7 @@ public class HTable implements HTableInterface, Closeable {
     private long lastNext;
     // Keep lastResult returned successfully in case we have to reset scanner.
     private Result lastResult = null;
+    private ScanMetrics scanMetrics = null;
 
     protected ClientScanner(final Scan scan) {
       if (CLIENT_LOG.isDebugEnabled()) {
@@ -999,6 +1047,13 @@ public class HTable implements HTableInterface, Closeable {
       }
       this.scan = scan;
       this.lastNext = System.currentTimeMillis();
+
+      // check if application wants to collect scan metrics
+      byte[] enableMetrics = scan.getAttribute(
+        Scan.SCAN_ATTRIBUTES_METRICS_ENABLE);
+      if (enableMetrics != null && Bytes.toBoolean(enableMetrics)) {
+        scanMetrics = new ScanMetrics();
+      }
 
       // Use the caching from the Scan.  If not set, use the default cache setting for this table.
       if (this.scan.getCaching() > 0) {
@@ -1095,6 +1150,9 @@ public class HTable implements HTableInterface, Closeable {
         // beginning of the region
         getConnection().getRegionServerWithRetries(callable);
         this.currentRegion = callable.getHRegionInfo();
+        if (this.scanMetrics != null) {
+          this.scanMetrics.countOfRegions.inc();
+        }
       } catch (IOException e) {
         close();
         throw e;
@@ -1106,15 +1164,39 @@ public class HTable implements HTableInterface, Closeable {
         int nbRows) {
       scan.setStartRow(localStartKey);
       ScannerCallable s = new ScannerCallable(getConnection(),
-        getTableName(), scan);
+        getTableName(), scan, this.scanMetrics);
       s.setCaching(nbRows);
       return s;
+    }
+
+    /**
+     * publish the scan metrics
+     * For now, we use scan.setAttribute to pass the metrics for application
+     * or TableInputFormat to consume
+     * Later, we could push it to other systems
+     * We don't use metrics framework because it doesn't support
+     * multi instances of the same metrics on the same machine; for scan/map
+     * reduce scenarios, we will have multiple scans running at the same time
+     */
+    private void writeScanMetrics() throws IOException
+    {
+      // by default, scanMetrics is null
+      // if application wants to collect scanMetrics, it can turn it on by
+      // calling scan.setAttribute(SCAN_ATTRIBUTES_METRICS_ENABLE,
+      // Bytes.toBytes(Boolean.TRUE))
+      if (this.scanMetrics == null) {
+        return;
+      }
+      final DataOutputBuffer d = new DataOutputBuffer();
+      scanMetrics.write(d);
+      scan.setAttribute(Scan.SCAN_ATTRIBUTES_METRICS_DATA, d.getData());
     }
 
     public Result next() throws IOException {
       // If the scanner is closed but there is some rows left in the cache,
       // it will first empty it before returning null
       if (cache.size() == 0 && this.closed) {
+        writeScanMetrics();
         return null;
       }
       if (cache.size() == 0) {
@@ -1157,7 +1239,8 @@ public class HTable implements HTableInterface, Closeable {
               }
             } else {
               Throwable cause = e.getCause();
-              if (cause == null || !(cause instanceof NotServingRegionException)) {
+              if (cause == null || (!(cause instanceof NotServingRegionException)
+                  && !(cause instanceof RegionServerStoppedException))) {
                 throw e;
               }
             }
@@ -1173,7 +1256,12 @@ public class HTable implements HTableInterface, Closeable {
             this.currentRegion = null;
             continue;
           }
-          lastNext = System.currentTimeMillis();
+          long currentTime = System.currentTimeMillis();
+          if (this.scanMetrics != null ) {
+            this.scanMetrics.sumOfMillisSecBetweenNexts.inc(
+              currentTime-lastNext);
+          }
+          lastNext = currentTime;
           if (values != null && values.length > 0) {
             for (Result rs : values) {
               cache.add(rs);
@@ -1191,6 +1279,7 @@ public class HTable implements HTableInterface, Closeable {
       if (cache.size() > 0) {
         return cache.poll();
       }
+      writeScanMetrics();
       return null;
     }
 

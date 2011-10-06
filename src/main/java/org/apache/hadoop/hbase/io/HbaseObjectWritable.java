@@ -82,6 +82,7 @@ import org.apache.hadoop.hbase.filter.SkipFilter;
 import org.apache.hadoop.hbase.filter.ValueFilter;
 import org.apache.hadoop.hbase.filter.WhileMatchFilter;
 import org.apache.hadoop.hbase.filter.WritableByteArrayComparable;
+import org.apache.hadoop.hbase.regionserver.RegionOpeningState;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.wal.HLog;
 import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
@@ -163,6 +164,7 @@ public class HbaseObjectWritable implements Writable, WritableWithSize, Configur
     addToMap(HServerAddress.class, code++);
     addToMap(HServerInfo.class, code++);
     addToMap(HTableDescriptor.class, code++);
+    addToMap(HTableDescriptor[].class, code++);
     addToMap(MapWritable.class, code++);
 
     //
@@ -233,6 +235,9 @@ public class HbaseObjectWritable implements Writable, WritableWithSize, Configur
     addToMap(ColumnRangeFilter.class, code++);
 
     addToMap(HServerLoad.class, code++);
+    
+    addToMap(RegionOpeningState.class, code++);
+    
   }
 
   private Class<?> declaredClass;

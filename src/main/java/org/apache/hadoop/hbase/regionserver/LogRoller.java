@@ -22,14 +22,11 @@ package org.apache.hadoop.hbase.regionserver;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hbase.HConstants;
-import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.RemoteExceptionHandler;
-import org.apache.hadoop.hbase.Server;
+import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.regionserver.wal.FailedLogCloseException;
 import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
-import org.apache.hadoop.hbase.regionserver.wal.WALObserver;
+import org.apache.hadoop.hbase.regionserver.wal.WALActionsListener;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import java.io.IOException;
@@ -43,7 +40,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * can be interrupted when there is something to do, rather than the Chore
  * sleep time which is invariant.
  */
-class LogRoller extends Thread implements WALObserver {
+class LogRoller extends Thread implements WALActionsListener {
   static final Log LOG = LogFactory.getLog(LogRoller.class);
   private final ReentrantLock rollLock = new ReentrantLock();
   private final AtomicBoolean rollLog = new AtomicBoolean(false);
@@ -86,12 +83,14 @@ class LogRoller extends Thread implements WALObserver {
         if (LOG.isDebugEnabled()) {
           LOG.debug("Hlog roll period " + this.rollperiod + "ms elapsed");
         }
+      } else if (LOG.isDebugEnabled()) {
+        LOG.debug("HLog roll manually triggered");
       }
       rollLock.lock(); // FindBugs UL_UNRELEASED_LOCK_EXCEPTION_PATH
       try {
         this.lastrolltime = now;
         // This is array of actual region names.
-        byte [][] regionsToFlush = this.services.getWAL().rollWriter();
+        byte [][] regionsToFlush = this.services.getWAL().rollWriter(rollLog.get());
         if (regionsToFlush != null) {
           for (byte [] r: regionsToFlush) scheduleFlush(r);
         }
@@ -155,7 +154,22 @@ class LogRoller extends Thread implements WALObserver {
   }
 
   @Override
-  public void logRolled(Path newFile) {
+  public void preLogRoll(Path oldPath, Path newPath) throws IOException {
+    // Not interested
+  }
+
+  @Override
+  public void postLogRoll(Path oldPath, Path newPath) throws IOException {
+    // Not interested
+  }
+
+  @Override
+  public void preLogArchive(Path oldPath, Path newPath) throws IOException {
+    // Not interested
+  }
+
+  @Override
+  public void postLogArchive(Path oldPath, Path newPath) throws IOException {
     // Not interested
   }
 
@@ -163,6 +177,12 @@ class LogRoller extends Thread implements WALObserver {
   public void visitLogEntryBeforeWrite(HRegionInfo info, HLogKey logKey,
       WALEdit logEdit) {
     // Not interested.
+  }
+
+  @Override
+  public void visitLogEntryBeforeWrite(HTableDescriptor htd, HLogKey logKey,
+                                       WALEdit logEdit) {
+    //Not interested
   }
 
   @Override

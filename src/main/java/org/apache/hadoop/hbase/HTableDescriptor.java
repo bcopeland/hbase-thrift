@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.regex.Matcher;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
@@ -62,6 +63,12 @@ public class HTableDescriptor implements WritableComparable<HTableDescriptor> {
   public static final String MAX_FILESIZE = "MAX_FILESIZE";
   public static final ImmutableBytesWritable MAX_FILESIZE_KEY =
     new ImmutableBytesWritable(Bytes.toBytes(MAX_FILESIZE));
+
+  // The class which determines when a region should split
+  public static final String SPLIT_POLICY = "SPLIT_POLICY";
+  public static final ImmutableBytesWritable SPLIT_POLICY_KEY =
+    new ImmutableBytesWritable(Bytes.toBytes(SPLIT_POLICY));
+  
   public static final String READONLY = "READONLY";
   public static final ImmutableBytesWritable READONLY_KEY =
     new ImmutableBytesWritable(Bytes.toBytes(READONLY));
@@ -421,6 +428,15 @@ public class HTableDescriptor implements WritableComparable<HTableDescriptor> {
       return Long.valueOf(Bytes.toString(value)).longValue();
     return HConstants.DEFAULT_MAX_FILE_SIZE;
   }
+  
+  /**
+   * @return the class name of the region split policy for this table.
+   * If this returns null, the default constant size based split policy
+   * is used.
+   */
+  public String getRegionSplitPolicyClassName() {
+    return getValue(SPLIT_POLICY);
+  }
 
   /** @param name name of table */
   public void setName(byte[] name) {
@@ -513,6 +529,52 @@ public class HTableDescriptor implements WritableComparable<HTableDescriptor> {
     s.append(" => ");
     s.append(families.values());
     s.append('}');
+    return s.toString();
+  }
+
+  /**
+   * @return Name of this table and then a map of all of the column family
+   * descriptors (with only the non-default column family attributes)
+   */
+  public String toStringCustomizedValues() {
+    StringBuilder s = new StringBuilder();
+    s.append('{');
+    s.append(HConstants.NAME);
+    s.append(" => '");
+    s.append(Bytes.toString(name));
+    s.append("'");
+    for (Map.Entry<ImmutableBytesWritable, ImmutableBytesWritable> e:
+        values.entrySet()) {
+      String key = Bytes.toString(e.getKey().get());
+      String value = Bytes.toString(e.getValue().get());
+      if (key == null) {
+        continue;
+      }
+      String upperCase = key.toUpperCase();
+      if (upperCase.equals(IS_ROOT) || upperCase.equals(IS_META)) {
+        // Skip. Don't bother printing out read-only values if false.
+        if (value.toLowerCase().equals(Boolean.FALSE.toString())) {
+          continue;
+        }
+      }
+      s.append(", ");
+      s.append(Bytes.toString(e.getKey().get()));
+      s.append(" => '");
+      s.append(Bytes.toString(e.getValue().get()));
+      s.append("'");
+    }
+    s.append(", ");
+    s.append(FAMILIES);
+    s.append(" => [");
+    int size = families.values().size();
+    int i = 0;
+    for(HColumnDescriptor hcd : families.values()) {
+      s.append(hcd.toStringCustomizedValues());
+      i++;
+      if( i != size)
+        s.append(", ");
+    }
+    s.append("]}");
     return s.toString();
   }
 
@@ -665,6 +727,109 @@ public class HTableDescriptor implements WritableComparable<HTableDescriptor> {
    */
   public HColumnDescriptor removeFamily(final byte [] column) {
     return this.families.remove(column);
+  }
+
+  /**
+   * Add a table coprocessor to this table. The coprocessor
+   * type must be {@link org.apache.hadoop.hbase.coprocessor.RegionObserver}
+   * or Endpoint.
+   * It won't check if the class can be loaded or not.
+   * Whether a coprocessor is loadable or not will be determined when
+   * a region is opened.
+   * @param className Full class name.
+   * @throws IOException
+   */
+  public void addCoprocessor(String className) throws IOException {
+    addCoprocessor(className, null, Coprocessor.PRIORITY_USER, null);
+  }
+
+  /**
+   * Add a table coprocessor to this table. The coprocessor
+   * type must be {@link org.apache.hadoop.hbase.coprocessor.RegionObserver}
+   * or Endpoint.
+   * It won't check if the class can be loaded or not.
+   * Whether a coprocessor is loadable or not will be determined when
+   * a region is opened.
+   * @param jarFilePath Path of the jar file. If it's null, the class will be
+   * loaded from default classloader.
+   * @param className Full class name.
+   * @param priority Priority
+   * @param kvs Arbitrary key-value parameter pairs passed into the coprocessor.
+   * @throws IOException
+   */
+  public void addCoprocessor(String className, Path jarFilePath,
+                             int priority, final Map<String, String> kvs)
+  throws IOException {
+    if (hasCoprocessor(className)) {
+      throw new IOException("Coprocessor " + className + " already exists.");
+    }
+    // validate parameter kvs
+    StringBuilder kvString = new StringBuilder();
+    if (kvs != null) {
+      for (Map.Entry<String, String> e: kvs.entrySet()) {
+        if (!e.getKey().matches(HConstants.CP_HTD_ATTR_VALUE_PARAM_KEY_PATTERN)) {
+          throw new IOException("Illegal parameter key = " + e.getKey());
+        }
+        if (!e.getValue().matches(HConstants.CP_HTD_ATTR_VALUE_PARAM_VALUE_PATTERN)) {
+          throw new IOException("Illegal parameter (" + e.getKey() +
+              ") value = " + e.getValue());
+        }
+        if (kvString.length() != 0) {
+          kvString.append(',');
+        }
+        kvString.append(e.getKey());
+        kvString.append('=');
+        kvString.append(e.getValue());
+      }
+    }
+
+    // generate a coprocessor key
+    int maxCoprocessorNumber = 0;
+    Matcher keyMatcher;
+    for (Map.Entry<ImmutableBytesWritable, ImmutableBytesWritable> e:
+        this.values.entrySet()) {
+      keyMatcher =
+          HConstants.CP_HTD_ATTR_KEY_PATTERN.matcher(
+              Bytes.toString(e.getKey().get()));
+      if (!keyMatcher.matches()) {
+        continue;
+      }
+      maxCoprocessorNumber = Math.max(Integer.parseInt(keyMatcher.group(1)),
+          maxCoprocessorNumber);
+    }
+    maxCoprocessorNumber++;
+
+    String key = "coprocessor$" + Integer.toString(maxCoprocessorNumber);
+    String value = ((jarFilePath == null)? "" : jarFilePath.toString()) +
+        "|" + className + "|" + Integer.toString(priority) + "|" +
+        kvString.toString();
+    setValue(key, value);
+  }
+
+  public boolean hasCoprocessor(String className) {
+    Matcher keyMatcher;
+    Matcher valueMatcher;
+    for (Map.Entry<ImmutableBytesWritable, ImmutableBytesWritable> e:
+        this.values.entrySet()) {
+      keyMatcher =
+          HConstants.CP_HTD_ATTR_KEY_PATTERN.matcher(
+              Bytes.toString(e.getKey().get()));
+      if (!keyMatcher.matches()) {
+        continue;
+      }
+      valueMatcher =
+        HConstants.CP_HTD_ATTR_VALUE_PATTERN.matcher(
+            Bytes.toString(e.getValue().get()));
+      if (!valueMatcher.matches()) {
+        continue;
+      }
+      // get className and compare
+      String clazz = valueMatcher.group(2).trim(); // classname is the 2nd field
+      if (clazz.equals(className.trim())) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

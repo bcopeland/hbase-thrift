@@ -20,14 +20,23 @@
 
 package org.apache.hadoop.hbase.util;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTable;
@@ -36,17 +45,7 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
-import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.HLog;
-import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.KeyValue;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 /**
  * Contains utility methods for manipulating HBase meta tables.
@@ -59,7 +58,6 @@ public class MetaUtils {
   private static final Log LOG = LogFactory.getLog(MetaUtils.class);
   private final Configuration conf;
   private FileSystem fs;
-  private Path rootdir;
   private HLog log;
   private HRegion rootRegion;
   private Map<byte [], HRegion> metaRegions = Collections.synchronizedSortedMap(
@@ -89,8 +87,6 @@ public class MetaUtils {
    */
   private void initialize() throws IOException {
     this.fs = FileSystem.get(this.conf);
-    // Get root directory of HBase installation
-    this.rootdir = FSUtils.getRootDir(this.conf);
   }
 
   /**
@@ -266,14 +262,16 @@ public class MetaUtils {
     if (this.rootRegion != null) {
       return this.rootRegion;
     }
-    this.rootRegion = HRegion.openHRegion(HRegionInfo.ROOT_REGIONINFO, getLog(),
+    this.rootRegion = HRegion.openHRegion(HRegionInfo.ROOT_REGIONINFO,
+      HTableDescriptor.ROOT_TABLEDESC, getLog(),
       this.conf);
     this.rootRegion.compactStores();
     return this.rootRegion;
   }
 
   private HRegion openMetaRegion(HRegionInfo metaInfo) throws IOException {
-    HRegion meta = HRegion.openHRegion(metaInfo, getLog(), this.conf);
+    HRegion meta = HRegion.openHRegion(metaInfo, HTableDescriptor.META_TABLEDESC,
+      getLog(), this.conf);
     meta.compactStores();
     return meta;
   }
@@ -319,78 +317,6 @@ public class MetaUtils {
         HConstants.STARTCODE_QUALIFIER);
 
     t.delete(delete);
-  }
-
-  /**
-   * Offline version of the online TableOperation,
-   * org.apache.hadoop.hbase.master.AddColumn.
-   * @param tableName table name
-   * @param hcd Add this column to <code>tableName</code>
-   * @throws IOException e
-   */
-  public void addColumn(final byte [] tableName,
-      final HColumnDescriptor hcd)
-  throws IOException {
-    List<HRegionInfo> metas = getMETARows(tableName);
-    for (HRegionInfo hri: metas) {
-      final HRegion m = getMetaRegion(hri);
-      scanMetaRegion(m, new ScannerListener() {
-        private boolean inTable = true;
-
-        @SuppressWarnings("synthetic-access")
-        public boolean processRow(HRegionInfo info) throws IOException {
-          LOG.debug("Testing " + Bytes.toString(tableName) + " against " +
-            Bytes.toString(info.getTableDesc().getName()));
-          if (Bytes.equals(info.getTableDesc().getName(), tableName)) {
-            this.inTable = false;
-            info.getTableDesc().addFamily(hcd);
-            updateMETARegionInfo(m, info);
-            return true;
-          }
-          // If we got here and we have not yet encountered the table yet,
-          // inTable will be false.  Otherwise, we've passed out the table.
-          // Stop the scanner.
-          return this.inTable;
-        }});
-    }
-  }
-
-  /**
-   * Offline version of the online TableOperation,
-   * org.apache.hadoop.hbase.master.DeleteColumn.
-   * @param tableName table name
-   * @param columnFamily Name of column name to remove.
-   * @throws IOException e
-   */
-  public void deleteColumn(final byte [] tableName,
-      final byte [] columnFamily) throws IOException {
-    List<HRegionInfo> metas = getMETARows(tableName);
-    for (HRegionInfo hri: metas) {
-      final HRegion m = getMetaRegion(hri);
-      scanMetaRegion(m, new ScannerListener() {
-        private boolean inTable = true;
-
-        @SuppressWarnings("synthetic-access")
-        public boolean processRow(HRegionInfo info) throws IOException {
-          if (Bytes.equals(info.getTableDesc().getName(), tableName)) {
-            this.inTable = false;
-            info.getTableDesc().removeFamily(columnFamily);
-            updateMETARegionInfo(m, info);
-            Path tabledir = new Path(rootdir,
-              info.getTableDesc().getNameAsString());
-            Path p = Store.getStoreHomedir(tabledir, info.getEncodedName(),
-              columnFamily);
-            if (!fs.delete(p, true)) {
-              LOG.warn("Failed delete of " + p);
-            }
-            return false;
-          }
-          // If we got here and we have not yet encountered the table yet,
-          // inTable will be false.  Otherwise, we've passed out the table.
-          // Stop the scanner.
-          return this.inTable;
-        }});
-    }
   }
 
   /**
@@ -466,7 +392,7 @@ public class MetaUtils {
 
       public boolean processRow(HRegionInfo info) throws IOException {
         SL_LOG.debug("Testing " + info);
-        if (Bytes.equals(info.getTableDesc().getName(),
+        if (Bytes.equals(info.getTableName(),
             HConstants.META_TABLE_NAME)) {
           result.add(info);
           return false;

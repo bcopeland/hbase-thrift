@@ -1,5 +1,5 @@
 /**
- * Copyright 2010 The Apache Software Foundation
+ * Copyright 2011 The Apache Software Foundation
  *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -21,10 +21,14 @@ package org.apache.hadoop.hbase.client;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.io.InterruptedIOException;
+import java.lang.reflect.UndeclaredThrowableException;
+import java.net.SocketTimeoutException;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -44,15 +48,20 @@ import org.apache.hadoop.hbase.RegionException;
 import org.apache.hadoop.hbase.RemoteExceptionHandler;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableExistsException;
+import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.UnknownRegionException;
 import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.catalog.CatalogTracker;
 import org.apache.hadoop.hbase.catalog.MetaReader;
+import org.apache.hadoop.hbase.client.MetaScanner.MetaScannerVisitor;
+import org.apache.hadoop.hbase.coprocessor.ObserverContext;
 import org.apache.hadoop.hbase.ipc.HMasterInterface;
 import org.apache.hadoop.hbase.ipc.HRegionInterface;
+import org.apache.hadoop.hbase.regionserver.wal.FailedLogCloseException;
 import org.apache.hadoop.hbase.util.Addressing;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.util.Writables;
 import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.util.StringUtils;
 
@@ -68,7 +77,7 @@ import org.apache.hadoop.util.StringUtils;
 public class HBaseAdmin implements Abortable, Closeable {
   private final Log LOG = LogFactory.getLog(this.getClass().getName());
 //  private final HConnection connection;
-  private final HConnection connection;
+  private HConnection connection;
   private volatile Configuration conf;
   private final long pause;
   private final int numRetries;
@@ -76,7 +85,8 @@ public class HBaseAdmin implements Abortable, Closeable {
   // numRetries is for 'normal' stuff... Mutliply by this factor when
   // want to wait a long time.
   private final int retryLongerMultiplier;
-
+  private boolean aborted;
+  
   /**
    * Constructor
    *
@@ -87,11 +97,33 @@ public class HBaseAdmin implements Abortable, Closeable {
   public HBaseAdmin(Configuration c)
   throws MasterNotRunningException, ZooKeeperConnectionException {
     this.conf = HBaseConfiguration.create(c);
-    this.connection = HConnectionManager.getConnection(this.conf);
+      this.connection = HConnectionManager.getConnection(this.conf);
     this.pause = this.conf.getLong("hbase.client.pause", 1000);
     this.numRetries = this.conf.getInt("hbase.client.retries.number", 10);
-    this.retryLongerMultiplier = this.conf.getInt("hbase.client.retries.longer.multiplier", 10);
-    this.connection.getMaster();
+    this.retryLongerMultiplier = this.conf.getInt(
+        "hbase.client.retries.longer.multiplier", 10);
+    int tries = 0;
+    for (; tries < numRetries; ++tries) {
+      try {
+        this.connection.getMaster();
+        break;
+      } catch (MasterNotRunningException mnre) {
+        HConnectionManager.deleteStaleConnection(this.connection);
+        this.connection = HConnectionManager.getConnection(this.conf);
+      } catch (UndeclaredThrowableException ute) {
+        HConnectionManager.deleteStaleConnection(this.connection);
+        this.connection = HConnectionManager.getConnection(this.conf);
+      }
+      try { // Sleep
+        Thread.sleep(getPauseTime(tries));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new MasterNotRunningException("Interrupted");
+      }
+    }
+    if (tries >= numRetries) {
+      throw new MasterNotRunningException("Retried " + numRetries + " times");
+    }
   }
 
   /**
@@ -106,6 +138,7 @@ public class HBaseAdmin implements Abortable, Closeable {
     CatalogTracker ct = null;
     try {
       ct = new CatalogTracker(this.conf);
+
       ct.start();
     } catch (InterruptedException e) {
       // Let it out as an IOE for now until we redo all so tolerate IEs
@@ -122,7 +155,13 @@ public class HBaseAdmin implements Abortable, Closeable {
   @Override
   public void abort(String why, Throwable e) {
     // Currently does nothing but throw the passed message and exception
+    this.aborted = true;
     throw new RuntimeException(why, e);
+  }
+  
+  @Override
+  public boolean isAborted(){
+    return this.aborted;
   }
 
   /** @return HConnection used by this object. */
@@ -190,15 +229,47 @@ public class HBaseAdmin implements Abortable, Closeable {
     return this.connection.listTables();
   }
 
+  /**
+   * List all the userspace tables matching the given pattern.
+   *
+   * @param pattern The compiled regular expression to match against
+   * @return - returns an array of HTableDescriptors
+   * @throws IOException if a remote or network exception occurs
+   * @see #listTables()
+   */
+  public HTableDescriptor[] listTables(Pattern pattern) throws IOException {
+    List<HTableDescriptor> matched = new LinkedList<HTableDescriptor>();
+    HTableDescriptor[] tables = listTables();
+    for (HTableDescriptor table : tables) {
+      if (pattern.matcher(table.getNameAsString()).matches()) {
+        matched.add(table);
+      }
+    }
+    return matched.toArray(new HTableDescriptor[matched.size()]);
+  }
+
+  /**
+   * List all the userspace tables matching the given regular expression.
+   *
+   * @param regex The regular expression to match against
+   * @return - returns an array of HTableDescriptors
+   * @throws IOException if a remote or network exception occurs
+   * @see #listTables(java.util.regex.Pattern)
+   */
+  public HTableDescriptor[] listTables(String regex) throws IOException {
+    return listTables(Pattern.compile(regex));
+  }
+
 
   /**
    * Method for getting the tableDescriptor
    * @param tableName as a byte []
    * @return the tableDescriptor
+   * @throws TableNotFoundException
    * @throws IOException if a remote or network exception occurs
    */
   public HTableDescriptor getTableDescriptor(final byte [] tableName)
-  throws IOException {
+  throws TableNotFoundException, IOException {
     return this.connection.getHTableDescriptor(tableName);
   }
 
@@ -271,9 +342,7 @@ public class HBaseAdmin implements Abortable, Closeable {
   /**
    * Creates a new table with an initial set of empty regions defined by the
    * specified split keys.  The total number of regions created will be the
-   * number of split keys plus one (the first region has a null start key and
-   * the last region has a null end key).
-   * Synchronous operation.
+   * number of split keys plus one. Synchronous operation.
    *
    * @param desc table descriptor for table
    * @param splitKeys array of split keys for the initial regions of the table
@@ -285,26 +354,65 @@ public class HBaseAdmin implements Abortable, Closeable {
    * and attempt-at-creation).
    * @throws IOException
    */
-  public void createTable(HTableDescriptor desc, byte [][] splitKeys)
+  public void createTable(final HTableDescriptor desc, byte [][] splitKeys)
   throws IOException {
     HTableDescriptor.isLegalTableName(desc.getName());
-    createTableAsync(desc, splitKeys);
-    for (int tries = 0; tries < numRetries; tries++) {
-      try {
-        // Wait for new table to come on-line
-        connection.locateRegion(desc.getName(), HConstants.EMPTY_START_ROW);
-        break;
-
-      } catch (RegionException e) {
-        if (tries == numRetries - 1) {
-          // Ran out of tries
-          throw e;
+    try {
+      createTableAsync(desc, splitKeys);
+    } catch (SocketTimeoutException ste) {
+      LOG.warn("Creating " + desc.getNameAsString() + " took too long", ste);
+    }
+    int numRegs = splitKeys == null ? 1 : splitKeys.length + 1;
+    int prevRegCount = 0;
+    for (int tries = 0; tries < this.numRetries * this.retryLongerMultiplier;
+      ++tries) {
+      // Wait for new table to come on-line
+      final AtomicInteger actualRegCount = new AtomicInteger(0);
+      MetaScannerVisitor visitor = new MetaScannerVisitor() {
+        @Override
+        public boolean processRow(Result rowResult) throws IOException {
+          HRegionInfo info = Writables.getHRegionInfoOrNull(
+              rowResult.getValue(HConstants.CATALOG_FAMILY,
+                  HConstants.REGIONINFO_QUALIFIER));
+          //If regioninfo is null, skip this row
+          if (null == info) {
+            return true;
+          }
+          if (!(Bytes.equals(info.getTableName(), desc.getName()))) {
+            return false;
+          }
+          String hostAndPort = null;
+          byte [] value = rowResult.getValue(HConstants.CATALOG_FAMILY,
+              HConstants.SERVER_QUALIFIER);
+          // Make sure that regions are assigned to server
+          if (value != null && value.length > 0) {
+            hostAndPort = Bytes.toString(value);
+          }
+          if (!(info.isOffline() || info.isSplit()) && hostAndPort != null) {
+            actualRegCount.incrementAndGet();
+          }
+          return true;
         }
-      }
-      try {
-        Thread.sleep(getPauseTime(tries));
-      } catch (InterruptedException e) {
-        // Just continue; ignore the interruption.
+      };
+      MetaScanner.metaScan(conf, visitor, desc.getName());
+      if (actualRegCount.get() != numRegs) {
+        if (tries == this.numRetries * this.retryLongerMultiplier - 1) {
+          throw new RegionOfflineException("Only " + actualRegCount.get() +
+            " of " + numRegs + " regions are online; retries exhausted.");
+        }
+        try { // Sleep
+          Thread.sleep(getPauseTime(tries));
+        } catch (InterruptedException e) {
+          throw new InterruptedIOException("Interrupted when opening" +
+              " regions; " + actualRegCount.get() + " of " + numRegs + 
+              " regions processed so far");
+        }
+        if (actualRegCount.get() > prevRegCount) { // Making progress
+          prevRegCount = actualRegCount.get();
+          tries = -1;
+        }
+      } else {
+        return;
       }
     }
   }
@@ -386,8 +494,23 @@ public class HBaseAdmin implements Abortable, Closeable {
           firstMetaServer.getRegionInfo().getRegionName(), scan);
         // Get a batch at a time.
         Result values = server.next(scannerId);
+
+        // let us wait until .META. table is updated and
+        // HMaster removes the table from its HTableDescriptors
         if (values == null) {
-          break;
+          boolean tableExists = false;
+          HTableDescriptor[] htds = getMaster().getHTableDescriptors();
+          if (htds != null && htds.length > 0) {
+            for (HTableDescriptor htd: htds) {
+              if (Bytes.equals(tableName, htd.getName())) {
+                tableExists = true;
+                break;
+              }
+            }
+          }
+          if (!tableExists) {
+            break;
+          }
         }
       } catch (IOException ex) {
         if(tries == numRetries - 1) {           // no more tries left
@@ -416,6 +539,48 @@ public class HBaseAdmin implements Abortable, Closeable {
     LOG.info("Deleted " + Bytes.toString(tableName));
   }
 
+  /**
+   * Deletes tables matching the passed in pattern and wait on completion.
+   *
+   * Warning: Use this method carefully, there is no prompting and the effect is
+   * immediate. Consider using {@link #listTables(java.lang.String)} and
+   * {@link #deleteTable(byte[])}
+   *
+   * @param regex The regular expression to match table names against
+   * @return Table descriptors for tables that couldn't be deleted
+   * @throws IOException
+   * @see #deleteTables(java.util.regex.Pattern)
+   * @see #deleteTable(java.lang.String)
+   */
+  public HTableDescriptor[] deleteTables(String regex) throws IOException {
+    return deleteTables(Pattern.compile(regex));
+  }
+
+  /**
+   * Delete tables matching the passed in pattern and wait on completion.
+   *
+   * Warning: Use this method carefully, there is no prompting and the effect is
+   * immediate. Consider using {@link #listTables(java.util.regex.Pattern) } and
+   * {@link #deleteTable(byte[])}
+   *
+   * @param pattern The pattern to match table names against
+   * @return Table descriptors for tables that couldn't be deleted
+   * @throws IOException
+   */
+  public HTableDescriptor[] deleteTables(Pattern pattern) throws IOException {
+    List<HTableDescriptor> failed = new LinkedList<HTableDescriptor>();
+    for (HTableDescriptor table : listTables(pattern)) {
+      try {
+        deleteTable(table.getName());
+      } catch (IOException ex) {
+        LOG.info("Failed to delete table " + table.getNameAsString(), ex);
+        failed.add(table);
+      }
+    }
+    return failed.toArray(new HTableDescriptor[failed.size()]);
+  }
+
+
   public void enableTable(final String tableName)
   throws IOException {
     enableTable(Bytes.toBytes(tableName));
@@ -424,8 +589,12 @@ public class HBaseAdmin implements Abortable, Closeable {
   /**
    * Enable a table.  May timeout.  Use {@link #enableTableAsync(byte[])}
    * and {@link #isTableEnabled(byte[])} instead.
+   * The table has to be in disabled state for it to be enabled.
    * @param tableName name of the table
    * @throws IOException if a remote or network exception occurs
+   * There could be couple types of IOException
+   * TableNotFoundException means the table doesn't exist.
+   * TableNotDisabledException means the table isn't in disabled state.
    * @see #isTableEnabled(byte[])
    * @see #disableTable(byte[])
    * @see #enableTableAsync(byte[])
@@ -488,6 +657,47 @@ public class HBaseAdmin implements Abortable, Closeable {
     LOG.info("Started enable of " + Bytes.toString(tableName));
   }
 
+  /**
+   * Enable tables matching the passed in pattern and wait on completion.
+   *
+   * Warning: Use this method carefully, there is no prompting and the effect is
+   * immediate. Consider using {@link #listTables(java.lang.String)} and
+   * {@link #enableTable(byte[])}
+   *
+   * @param regex The regular expression to match table names against
+   * @throws IOException
+   * @see #enableTables(java.util.regex.Pattern)
+   * @see #enableTable(java.lang.String)
+   */
+  public HTableDescriptor[] enableTables(String regex) throws IOException {
+    return enableTables(Pattern.compile(regex));
+  }
+
+  /**
+   * Enable tables matching the passed in pattern and wait on completion.
+   *
+   * Warning: Use this method carefully, there is no prompting and the effect is
+   * immediate. Consider using {@link #listTables(java.util.regex.Pattern) } and
+   * {@link #enableTable(byte[])}
+   *
+   * @param pattern The pattern to match table names against
+   * @throws IOException
+   */
+  public HTableDescriptor[] enableTables(Pattern pattern) throws IOException {
+    List<HTableDescriptor> failed = new LinkedList<HTableDescriptor>();
+    for (HTableDescriptor table : listTables(pattern)) {
+      if (isTableDisabled(table.getName())) {
+        try {
+          enableTable(table.getName());
+        } catch (IOException ex) {
+          LOG.info("Failed to enable table " + table.getNameAsString(), ex);
+          failed.add(table);
+        }
+      }
+    }
+    return failed.toArray(new HTableDescriptor[failed.size()]);
+  }
+
   public void disableTableAsync(final String tableName) throws IOException {
     disableTableAsync(Bytes.toBytes(tableName));
   }
@@ -524,8 +734,12 @@ public class HBaseAdmin implements Abortable, Closeable {
    * Disable table and wait on completion.  May timeout eventually.  Use
    * {@link #disableTableAsync(byte[])} and {@link #isTableDisabled(String)}
    * instead.
+   * The table has to be in enabled state for it to be disabled.
    * @param tableName
    * @throws IOException
+   * There could be couple types of IOException
+   * TableNotFoundException means the table doesn't exist.
+   * TableNotEnabledException means the table isn't in enabled state.
    */
   public void disableTable(final byte [] tableName)
   throws IOException {
@@ -556,6 +770,49 @@ public class HBaseAdmin implements Abortable, Closeable {
         " for the table " + Bytes.toString(tableName) + " to be disabled.");
     }
     LOG.info("Disabled " + Bytes.toString(tableName));
+  }
+
+  /**
+   * Disable tables matching the passed in pattern and wait on completion.
+   *
+   * Warning: Use this method carefully, there is no prompting and the effect is
+   * immediate. Consider using {@link #listTables(java.lang.String)} and
+   * {@link #disableTable(byte[])}
+   *
+   * @param regex The regular expression to match table names against
+   * @return Table descriptors for tables that couldn't be disabled
+   * @throws IOException
+   * @see #disableTables(java.util.regex.Pattern)
+   * @see #disableTable(java.lang.String)
+   */
+  public HTableDescriptor[] disableTables(String regex) throws IOException {
+    return disableTables(Pattern.compile(regex));
+  }
+
+  /**
+   * Disable tables matching the passed in pattern and wait on completion.
+   *
+   * Warning: Use this method carefully, there is no prompting and the effect is
+   * immediate. Consider using {@link #listTables(java.util.regex.Pattern) } and
+   * {@link #disableTable(byte[])}
+   *
+   * @param pattern The pattern to match table names against
+   * @return Table descriptors for tables that couldn't be disabled
+   * @throws IOException
+   */
+  public HTableDescriptor[] disableTables(Pattern pattern) throws IOException {
+    List<HTableDescriptor> failed = new LinkedList<HTableDescriptor>();
+    for (HTableDescriptor table : listTables(pattern)) {
+      if (isTableEnabled(table.getName())) {
+        try {
+          disableTable(table.getName());
+        } catch (IOException ex) {
+          LOG.info("Failed to disable table " + table.getNameAsString(), ex);
+          failed.add(table);
+        }
+      }
+    }
+    return failed.toArray(new HTableDescriptor[failed.size()]);
   }
 
   /**
@@ -611,6 +868,28 @@ public class HBaseAdmin implements Abortable, Closeable {
    */
   public boolean isTableAvailable(String tableName) throws IOException {
     return connection.isTableAvailable(Bytes.toBytes(tableName));
+  }
+
+  /**
+   * Get the status of alter command - indicates how many regions have received
+   * the updated schema Asynchronous operation.
+   *
+   * @param tableName
+   *          name of the table to get the status of
+   * @return Pair indicating the number of regions updated Pair.getFirst() is the
+   *         regions that are yet to be updated Pair.getSecond() is the total number
+   *         of regions of the table
+   * @throws IOException
+   *           if a remote or network exception occurs
+   */
+  public Pair<Integer, Integer> getAlterStatus(final byte[] tableName)
+  throws IOException {
+    HTableDescriptor.isLegalTableName(tableName);
+    try {
+      return getMaster().getAlterStatus(tableName);
+    } catch (RemoteException e) {
+      throw RemoteExceptionHandler.decodeRemoteException(e);
+    }
   }
 
   /**
@@ -743,34 +1022,36 @@ public class HBaseAdmin implements Abortable, Closeable {
    * Close a region. For expert-admins.  Runs close on the regionserver.  The
    * master will not be informed of the close.
    * @param regionname region name to close
-   * @param hostAndPort If supplied, we'll use this location rather than
+   * @param serverName If supplied, we'll use this location rather than
    * the one currently in <code>.META.</code>
    * @throws IOException if a remote or network exception occurs
    */
-  public void closeRegion(final String regionname, final String hostAndPort)
+  public void closeRegion(final String regionname, final String serverName)
   throws IOException {
-    closeRegion(Bytes.toBytes(regionname), hostAndPort);
+    closeRegion(Bytes.toBytes(regionname), serverName);
   }
 
   /**
    * Close a region.  For expert-admins  Runs close on the regionserver.  The
    * master will not be informed of the close.
    * @param regionname region name to close
-   * @param hostAndPort If supplied, we'll use this location rather than
-   * the one currently in <code>.META.</code>
+   * @param serverName The servername of the regionserver.  If passed null we
+   * will use servername found in the .META. table. A server name
+   * is made of host, port and startcode.  Here is an example:
+   * <code> host187.example.com,60020,1289493121758</code>
    * @throws IOException if a remote or network exception occurs
    */
-  public void closeRegion(final byte [] regionname, final String hostAndPort)
+  public void closeRegion(final byte [] regionname, final String serverName)
   throws IOException {
     CatalogTracker ct = getCatalogTracker();
     try {
-      if (hostAndPort != null) {
+      if (serverName != null) {
         Pair<HRegionInfo, ServerName> pair = MetaReader.getRegion(ct, regionname);
-        if (pair == null || pair.getSecond() == null) {
-          LOG.info("No server in .META. for " +
+        if (pair == null || pair.getFirst() == null) {
+          LOG.info("No region in .META. for " +
             Bytes.toStringBinary(regionname) + "; pair=" + pair);
         } else {
-          closeRegion(pair.getSecond(), pair.getFirst());
+          closeRegion(new ServerName(serverName), pair.getFirst());
         }
       } else {
         Pair<HRegionInfo, ServerName> pair = MetaReader.getRegion(ct, regionname);
@@ -786,7 +1067,53 @@ public class HBaseAdmin implements Abortable, Closeable {
     }
   }
 
-  private void closeRegion(final ServerName sn, final HRegionInfo hri)
+  /**
+   * For expert-admins. Runs close on the regionserver. Closes a region based on
+   * the encoded region name. The region server name is mandatory. If the
+   * servername is provided then based on the online regions in the specified
+   * regionserver the specified region will be closed. The master will not be
+   * informed of the close. Note that the regionname is the encoded regionname.
+   * 
+   * @param encodedRegionName
+   *          The encoded region name; i.e. the hash that makes up the region
+   *          name suffix: e.g. if regionname is
+   *          <code>TestTable,0094429456,1289497600452.527db22f95c8a9e0116f0cc13c680396.</code>
+   *          , then the encoded region name is:
+   *          <code>527db22f95c8a9e0116f0cc13c680396</code>.
+   * @param serverName
+   *          The servername of the regionserver. A server name is made of host,
+   *          port and startcode. This is mandatory. Here is an example:
+   *          <code> host187.example.com,60020,1289493121758</code>
+   * @return true if the region was closed, false if not.
+   * @throws IOException
+   *           if a remote or network exception occurs
+   */
+  public boolean closeRegionWithEncodedRegionName(final String encodedRegionName,
+      final String serverName) throws IOException {
+    byte[] encodedRegionNameInBytes = Bytes.toBytes(encodedRegionName);
+    if (null == serverName || ("").equals(serverName.trim())) {
+      throw new IllegalArgumentException(
+          "The servername cannot be null or empty.");
+    }
+    ServerName sn = new ServerName(serverName);
+    HRegionInterface rs = this.connection.getHRegionConnection(
+        sn.getHostname(), sn.getPort());
+    // Close the region without updating zk state.
+    boolean isRegionClosed = rs.closeRegion(encodedRegionNameInBytes, false);
+    if (false == isRegionClosed) {
+      LOG.error("Not able to close the region " + encodedRegionName + ".");
+    }
+    return isRegionClosed;
+  }
+
+  /**
+   * Close a region.  For expert-admins  Runs close on the regionserver.  The
+   * master will not be informed of the close.
+   * @param sn
+   * @param hri
+   * @throws IOException
+   */
+  public void closeRegion(final ServerName sn, final HRegionInfo hri)
   throws IOException {
     HRegionInterface rs =
       this.connection.getHRegionConnection(sn.getHostname(), sn.getPort());
@@ -984,15 +1311,33 @@ public class HBaseAdmin implements Abortable, Closeable {
   }
 
   /**
-   * @param regionName Region name to assign.
-   * @param force True to force assign.
+   * Tries to assign a region. Region could be reassigned to the same server.
+   * 
+   * @param regionName
+   *          Region name to assign.
+   * @param force
+   *          True to force assign.
+   * @throws MasterNotRunningException
+   * @throws ZooKeeperConnectionException
+   * @throws IOException
+   * @deprecated The <code>force</code> is unused.Use {@link #assign(byte[])}
+   */
+  public void assign(final byte[] regionName, final boolean force)
+      throws MasterNotRunningException, ZooKeeperConnectionException,
+      IOException {
+    getMaster().assign(regionName, force);
+  }
+  
+  /**
+   * @param regionName
+   *          Region name to assign.
    * @throws MasterNotRunningException
    * @throws ZooKeeperConnectionException
    * @throws IOException
    */
-  public void assign(final byte [] regionName, final boolean force)
-  throws MasterNotRunningException, ZooKeeperConnectionException, IOException {
-    getMaster().assign(regionName, force);
+  public void assign(final byte[] regionName) throws MasterNotRunningException,
+      ZooKeeperConnectionException, IOException {
+    getMaster().assign(regionName);
   }
 
   /**
@@ -1003,7 +1348,8 @@ public class HBaseAdmin implements Abortable, Closeable {
    * @param regionName Region to unassign. Will clear any existing RegionPlan
    * if one found.
    * @param force If true, force unassign (Will remove region from
-   * regions-in-transition too if present).
+   * regions-in-transition too if present. If results in double assignment
+   * use hbck -fix to resolve. To be used by experts).
    * @throws MasterNotRunningException
    * @throws ZooKeeperConnectionException
    * @throws IOException
@@ -1239,7 +1585,12 @@ public class HBaseAdmin implements Abortable, Closeable {
   throws MasterNotRunningException, ZooKeeperConnectionException {
     Configuration copyOfConf = HBaseConfiguration.create(conf);
     copyOfConf.setInt("hbase.client.retries.number", 1);
-    new HBaseAdmin(copyOfConf);
+    HBaseAdmin admin = new HBaseAdmin(copyOfConf);
+    try {
+      admin.close();
+    } catch (IOException ioe) {
+      admin.LOG.info("Failed to close connection", ioe);
+    }
   }
 
   /**
@@ -1265,5 +1616,37 @@ public class HBaseAdmin implements Abortable, Closeable {
     if (this.connection != null) {
       this.connection.close();
     }
+  }
+
+ /**
+ * Get tableDescriptors
+ * @param tableNames List of table names
+ * @return HTD[] the tableDescriptor
+ * @throws IOException if a remote or network exception occurs
+ */
+  public HTableDescriptor[] getTableDescriptors(List<String> tableNames)
+  throws IOException {
+    return this.connection.getHTableDescriptors(tableNames);
+  }
+
+  /**
+   * Roll the log writer. That is, start writing log messages to a new file.
+   * 
+   * @param serverName
+   *          The servername of the regionserver. A server name is made of host,
+   *          port and startcode. This is mandatory. Here is an example:
+   *          <code> host187.example.com,60020,1289493121758</code>
+   * @return If lots of logs, flush the returned regions so next time through
+   * we can clean logs. Returns null if nothing to flush.  Names are actual
+   * region names as returned by {@link HRegionInfo#getEncodedName()}  
+   * @throws IOException if a remote or network exception occurs
+   * @throws FailedLogCloseException
+   */
+ public synchronized  byte[][] rollHLogWriter(String serverName)
+      throws IOException, FailedLogCloseException {
+    ServerName sn = new ServerName(serverName);
+    HRegionInterface rs = this.connection.getHRegionConnection(
+        sn.getHostname(), sn.getPort());
+    return rs.rollHLogWriter();
   }
 }

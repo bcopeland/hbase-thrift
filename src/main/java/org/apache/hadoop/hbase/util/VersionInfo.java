@@ -20,13 +20,19 @@
 
 package org.apache.hadoop.hbase.util;
 
+import org.apache.commons.logging.LogFactory;
+import java.io.PrintWriter;
+
 import org.apache.hadoop.hbase.VersionAnnotation;
+import org.apache.hadoop.hbase.master.HMaster;
+import org.apache.commons.logging.Log;
 
 /**
  * This class finds the package info for hbase and the VersionAnnotation
  * information.  Taken from hadoop.  Only name of annotation is different.
  */
 public class VersionInfo {
+  private static final Log LOG = LogFactory.getLog(VersionInfo.class.getName());
   private static Package myPackage;
   private static VersionAnnotation version;
 
@@ -82,10 +88,28 @@ public class VersionInfo {
   public static String getUrl() {
     return version != null ? version.url() : "Unknown";
   }
+  
+  static String[] versionReport() {
+    return new String[] {
+      "HBase " + getVersion(),
+      "Subversion " + getUrl() + " -r " + getRevision(),
+      "Compiled by " + getUser() + " on " + getDate()
+      };
+  }
+
+  public static void writeTo(PrintWriter out) {
+    for (String line : versionReport()) {
+      out.println(line);
+    }
+  }
+
+  public static void logVersion() {
+    for (String line : versionReport()) {
+      LOG.info(line);
+    }
+  }
 
   public static void main(String[] args) {
-    System.out.println("HBase " + getVersion());
-    System.out.println("Subversion " + getUrl() + " -r " + getRevision());
-    System.out.println("Compiled by " + getUser() + " on " + getDate());
+    logVersion();
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2009 The Apache Software Foundation
+ * Copyright 2011 The Apache Software Foundation
  *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -23,6 +23,7 @@ package org.apache.hadoop.hbase.client;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -35,21 +36,33 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HServerAddress;
+import org.apache.hadoop.hbase.HServerInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.NotServingRegionException;
+import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableExistsException;
 import org.apache.hadoop.hbase.TableNotDisabledException;
+import org.apache.hadoop.hbase.TableNotEnabledException;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.executor.EventHandler;
 import org.apache.hadoop.hbase.executor.EventHandler.EventType;
 import org.apache.hadoop.hbase.executor.ExecutorService;
+import org.apache.hadoop.hbase.ipc.HRegionInterface;
 import org.apache.hadoop.hbase.master.MasterServices;
+import org.apache.hadoop.hbase.regionserver.HRegion;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
+import org.apache.hadoop.hbase.regionserver.wal.HLog;
+import org.apache.hadoop.hbase.regionserver.wal.TestHLogUtils;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.zookeeper.ZKAssign;
+import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
+import org.apache.zookeeper.KeeperException;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -124,6 +137,55 @@ public class TestAdmin {
   }
 
   @Test
+  public void testDisableAndEnableTables() throws IOException {
+    final byte [] row = Bytes.toBytes("row");
+    final byte [] qualifier = Bytes.toBytes("qualifier");
+    final byte [] value = Bytes.toBytes("value");
+    final byte [] table1 = Bytes.toBytes("testDisableAndEnableTable1");
+    final byte [] table2 = Bytes.toBytes("testDisableAndEnableTable2");
+    HTable ht1 = TEST_UTIL.createTable(table1, HConstants.CATALOG_FAMILY);
+    HTable ht2 = TEST_UTIL.createTable(table2, HConstants.CATALOG_FAMILY);
+    Put put = new Put(row);
+    put.add(HConstants.CATALOG_FAMILY, qualifier, value);
+    ht1.put(put);
+    ht2.put(put);
+    Get get = new Get(row);
+    get.addColumn(HConstants.CATALOG_FAMILY, qualifier);
+    ht1.get(get);
+    ht2.get(get);
+
+    this.admin.disableTables("testDisableAndEnableTable.*");
+
+    // Test that tables are disabled
+    get = new Get(row);
+    get.addColumn(HConstants.CATALOG_FAMILY, qualifier);
+    boolean ok = false;
+    try {
+      ht1.get(get);
+      ht2.get(get);
+    } catch (NotServingRegionException e) {
+      ok = true;
+    } catch (RetriesExhaustedException e) {
+      ok = true;
+    }
+    assertTrue(ok);
+    this.admin.enableTables("testDisableAndEnableTable.*");
+
+    // Test that tables are enabled
+    try {
+      ht1.get(get);
+    } catch (RetriesExhaustedException e) {
+      ok = false;
+    }
+    try {
+      ht2.get(get);
+    } catch (RetriesExhaustedException e) {
+      ok = false;
+    }
+    assertTrue(ok);
+  }
+
+  @Test
   public void testCreateTable() throws IOException {
     HTableDescriptor [] tables = admin.listTables();
     int numTables = tables.length;
@@ -161,11 +223,13 @@ public class TestAdmin {
   /**
    * Verify schema modification takes.
    * @throws IOException
+   * @throws InterruptedException
    */
-  @Test
-  public void testChangeTableSchema() throws IOException {
-    final byte [] tableName = Bytes.toBytes("changeTableSchema");
+  @Test 
+  public void testOnlineChangeTableSchema() throws IOException, InterruptedException {
+    final byte [] tableName = Bytes.toBytes("changeTableSchemaOnline");
     HTableDescriptor [] tables = admin.listTables();
+    MasterServices masterServices = TEST_UTIL.getMiniHBaseCluster().getMaster();
     int numTables = tables.length;
     TEST_UTIL.createTable(tableName, HConstants.CATALOG_FAMILY);
     tables = this.admin.listTables();
@@ -184,14 +248,11 @@ public class TestAdmin {
     copy.setValue(key, key);
     boolean expectedException = false;
     try {
-      this.admin.modifyTable(tableName, copy);
+      modifyTable(tableName, copy);
     } catch (TableNotDisabledException re) {
       expectedException = true;
     }
-    assertTrue(expectedException);
-    this.admin.disableTable(tableName);
-    assertTrue(this.admin.isTableDisabled(tableName));
-    modifyTable(tableName, copy);
+    assertFalse(expectedException);
     HTableDescriptor modifiedHtd = this.admin.getTableDescriptor(tableName);
     // Assert returned modifiedhcd is same as the copy.
     assertFalse(htd.equals(modifiedHtd));
@@ -199,11 +260,8 @@ public class TestAdmin {
     assertEquals(newFlushSize, modifiedHtd.getMemStoreFlushSize());
     assertEquals(key, modifiedHtd.getValue(key));
 
-    // Reenable table to test it fails if not disabled.
-    this.admin.enableTable(tableName);
-    assertFalse(this.admin.isTableDisabled(tableName));
-
     // Now work on column family changes.
+    htd = this.admin.getTableDescriptor(tableName);
     int countOfFamilies = modifiedHtd.getFamilies().size();
     assertTrue(countOfFamilies > 0);
     HColumnDescriptor hcd = modifiedHtd.getFamilies().iterator().next();
@@ -217,31 +275,25 @@ public class TestAdmin {
     } catch (TableNotDisabledException re) {
       expectedException = true;
     }
-    assertTrue(expectedException);
-    this.admin.disableTable(tableName);
-    assertTrue(this.admin.isTableDisabled(tableName));
-    // Modify Column is synchronous
-    this.admin.modifyColumn(tableName, hcd);
+    assertFalse(expectedException);
     modifiedHtd = this.admin.getTableDescriptor(tableName);
     HColumnDescriptor modifiedHcd = modifiedHtd.getFamily(hcdName);
     assertEquals(newMaxVersions, modifiedHcd.getMaxVersions());
 
     // Try adding a column
-    // Reenable table to test it fails if not disabled.
-    this.admin.enableTable(tableName);
     assertFalse(this.admin.isTableDisabled(tableName));
     final String xtracolName = "xtracol";
+    htd = this.admin.getTableDescriptor(tableName);
     HColumnDescriptor xtracol = new HColumnDescriptor(xtracolName);
     xtracol.setValue(xtracolName, xtracolName);
+    expectedException = false;
     try {
       this.admin.addColumn(tableName, xtracol);
     } catch (TableNotDisabledException re) {
       expectedException = true;
     }
-    assertTrue(expectedException);
-    this.admin.disableTable(tableName);
-    assertTrue(this.admin.isTableDisabled(tableName));
-    this.admin.addColumn(tableName, xtracol);
+    // Add column should work even if the table is enabled
+    assertFalse(expectedException);
     modifiedHtd = this.admin.getTableDescriptor(tableName);
     hcd = modifiedHtd.getFamily(xtracol.getName());
     assertTrue(hcd != null);
@@ -254,6 +306,7 @@ public class TestAdmin {
     assertTrue(hcd == null);
 
     // Delete the table
+    this.admin.disableTable(tableName);
     this.admin.deleteTable(tableName);
     this.admin.listTables();
     assertFalse(this.admin.tableExists(tableName));
@@ -515,29 +568,71 @@ public class TestAdmin {
    */
   @Test
   public void testForceSplit() throws Exception {
-      splitTest(null);
-      splitTest(Bytes.toBytes("pwn"));
-    }
+    byte[][] familyNames = new byte[][] { Bytes.toBytes("cf") };
+    int[] rowCounts = new int[] { 6000 };
+    int numVersions = HColumnDescriptor.DEFAULT_VERSIONS;
+    int blockSize = 256;
+    splitTest(null, familyNames, rowCounts, numVersions, blockSize);
 
-  void splitTest(byte[] splitPoint) throws Exception {
-    byte [] familyName = HConstants.CATALOG_FAMILY;
+    byte[] splitKey = Bytes.toBytes(3500);
+    splitTest(splitKey, familyNames, rowCounts, numVersions, blockSize);
+  }
+
+  /**
+   * Multi-family scenario. Tests forcing split from client and
+   * having scanners successfully ride over split.
+   * @throws Exception
+   * @throws IOException
+   */
+  @Test
+  public void testForceSplitMultiFamily() throws Exception {
+    int numVersions = HColumnDescriptor.DEFAULT_VERSIONS;
+
+    // use small HFile block size so that we can have lots of blocks in HFile
+    // Otherwise, if there is only one block,
+    // HFileBlockIndex.midKey()'s value == startKey
+    int blockSize = 256;
+    byte[][] familyNames = new byte[][] { Bytes.toBytes("cf1"),
+      Bytes.toBytes("cf2") };
+
+    // one of the column families isn't splittable
+    int[] rowCounts = new int[] { 6000, 1 };
+    splitTest(null, familyNames, rowCounts, numVersions, blockSize);
+
+    rowCounts = new int[] { 1, 6000 };
+    splitTest(null, familyNames, rowCounts, numVersions, blockSize);
+
+    // one column family has much smaller data than the other
+    // the split key should be based on the largest column family
+    rowCounts = new int[] { 6000, 300 };
+    splitTest(null, familyNames, rowCounts, numVersions, blockSize);
+
+    rowCounts = new int[] { 300, 6000 };
+    splitTest(null, familyNames, rowCounts, numVersions, blockSize);
+
+  }
+
+  void splitTest(byte[] splitPoint, byte[][] familyNames, int[] rowCounts,
+    int numVersions, int blockSize) throws Exception {
     byte [] tableName = Bytes.toBytes("testForceSplit");
     assertFalse(admin.tableExists(tableName));
-    final HTable table = TEST_UTIL.createTable(tableName, familyName);
+    final HTable table = TEST_UTIL.createTable(tableName, familyNames,
+      numVersions, blockSize);
     try {
-      byte[] k = new byte[3];
       int rowCount = 0;
-      for (byte b1 = 'a'; b1 < 'z'; b1++) {
-        for (byte b2 = 'a'; b2 < 'z'; b2++) {
-          for (byte b3 = 'a'; b3 < 'z'; b3++) {
-            k[0] = b1;
-            k[1] = b2;
-            k[2] = b3;
-            Put put = new Put(k);
-            put.add(familyName, new byte[0], k);
-            table.put(put);
-            rowCount++;
-          }
+
+      // insert rows into column families. The number of rows that have values
+      // in a specific column family is decided by rowCounts[familyIndex]
+      for (int index = 0; index < familyNames.length; index++) {
+        for (int i = 0; i < rowCounts[index]; i++) {
+          byte[] k = Bytes.toBytes(i);
+          Put put = new Put(k);
+          put.add(familyNames[index], new byte[0], k);
+          table.put(put);
+        }
+
+        if ( rowCount < rowCounts[index] ) {
+          rowCount = rowCounts[index];
         }
       }
 
@@ -602,21 +697,32 @@ public class TestAdmin {
       scanner.close();
       assertEquals(rowCount, rows);
 
+      Map<HRegionInfo, HServerAddress> regions = null;
+      try {
+        regions = table.getRegionsInfo();
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+      assertEquals(2, regions.size());
+      HRegionInfo[] r = regions.keySet().toArray(new HRegionInfo[0]);
       if (splitPoint != null) {
         // make sure the split point matches our explicit configuration
-        Map<HRegionInfo, HServerAddress> regions = null;
-        try {
-          regions = table.getRegionsInfo();
-        } catch (IOException e) {
-          e.printStackTrace();
-        }
-        assertEquals(2, regions.size());
-        HRegionInfo[] r = regions.keySet().toArray(new HRegionInfo[0]);
         assertEquals(Bytes.toString(splitPoint),
             Bytes.toString(r[0].getEndKey()));
         assertEquals(Bytes.toString(splitPoint),
             Bytes.toString(r[1].getStartKey()));
         LOG.debug("Properly split on " + Bytes.toString(splitPoint));
+      } else {
+        if (familyNames.length > 1) {
+          int splitKey = Bytes.toInt(r[0].getEndKey());
+          // check if splitKey is based on the largest column family
+          // in terms of it store size
+          int deltaForLargestFamily = Math.abs(rowCount/2 - splitKey);
+          for (int index = 0; index < familyNames.length; index++) {
+            int delta = Math.abs(rowCounts[index]/2 - splitKey);
+            assertTrue(delta >= deltaForLargestFamily);
+          }
+        }
       }
     } finally {
       TEST_UTIL.deleteTable(tableName);
@@ -735,6 +841,27 @@ public class TestAdmin {
     new HTable(TEST_UTIL.getConfiguration(), name);
   }
 
+  /***
+   * HMaster.createTable used to be kind of synchronous call
+   * Thus creating of table with lots of regions can cause RPC timeout
+   * After the fix to make createTable truly async, RPC timeout shouldn't be an
+   * issue anymore
+   * @throws Exception
+   */
+  @Test
+  public void testCreateTableRPCTimeOut() throws Exception {
+    String name = "testCreateTableRPCTimeOut";
+    TEST_UTIL.getConfiguration().setInt(HConstants.HBASE_RPC_TIMEOUT_KEY, 1500);
+
+    int expectedRegions = 100;
+    // Use 80 bit numbers to make sure we aren't limited
+    byte [] startKey = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+    byte [] endKey =   { 9, 9, 9, 9, 9, 9, 9, 9, 9, 9 };
+    HBaseAdmin hbaseadmin = new HBaseAdmin(TEST_UTIL.getConfiguration());
+    hbaseadmin.createTable(new HTableDescriptor(name), startKey, endKey,
+      expectedRegions);
+  }
+
   /**
    * Test read only tables
    * @throws Exception
@@ -787,10 +914,35 @@ public class TestAdmin {
    * @throws IOException
    */
   @Test (expected=TableExistsException.class)
-  public void testTableNotFoundExceptionWithATable() throws IOException {
-    final byte [] name = Bytes.toBytes("testTableNotFoundExceptionWithATable");
+  public void testTableExistsExceptionWithATable() throws IOException {
+    final byte [] name = Bytes.toBytes("testTableExistsExceptionWithATable");
     TEST_UTIL.createTable(name, HConstants.CATALOG_FAMILY);
     TEST_UTIL.createTable(name, HConstants.CATALOG_FAMILY);
+  }
+
+  /**
+   * Can't disable a table if the table isn't in enabled state
+   * @throws IOException
+   */
+  @Test (expected=TableNotEnabledException.class)
+  public void testTableNotEnabledExceptionWithATable() throws IOException {
+    final byte [] name = Bytes.toBytes(
+      "testTableNotEnabledExceptionWithATable");
+    TEST_UTIL.createTable(name, HConstants.CATALOG_FAMILY);
+    this.admin.disableTable(name);
+    this.admin.disableTable(name);
+  }
+
+  /**
+   * Can't enable a table if the table isn't in disabled state
+   * @throws IOException
+   */
+  @Test (expected=TableNotDisabledException.class)
+  public void testTableNotDisabledExceptionWithATable() throws IOException {
+    final byte [] name = Bytes.toBytes(
+      "testTableNotDisabledExceptionWithATable");
+    TEST_UTIL.createTable(name, HConstants.CATALOG_FAMILY);
+    this.admin.enableTable(name);
   }
 
   /**
@@ -802,6 +954,157 @@ public class TestAdmin {
     new HTable(TEST_UTIL.getConfiguration(),
         "testTableNotFoundExceptionWithoutAnyTables");
   }
+  @Test
+  public void testShouldCloseTheRegionBasedOnTheEncodedRegionName()
+      throws Exception {
+    byte[] TABLENAME = Bytes.toBytes("TestHBACloseRegion");
+    HBaseAdmin admin = createTable(TABLENAME);
+
+    HRegionInfo info = null;
+    HRegionServer rs = TEST_UTIL.getRSForFirstRegionInTable(TABLENAME);
+    List<HRegionInfo> onlineRegions = rs.getOnlineRegions();
+    for (HRegionInfo regionInfo : onlineRegions) {
+      if (!regionInfo.isMetaRegion() && !regionInfo.isRootRegion()) {
+        info = regionInfo;
+        admin.closeRegionWithEncodedRegionName(regionInfo.getEncodedName(), rs
+            .getServerName().getServerName());
+      }
+    }
+    Thread.sleep(1000);
+    onlineRegions = rs.getOnlineRegions();
+    assertFalse("The region should not be present in online regions list.",
+        onlineRegions.contains(info));
+  }
+
+  @Test
+  public void testCloseRegionIfInvalidRegionNameIsPassed() throws Exception {
+    byte[] TABLENAME = Bytes.toBytes("TestHBACloseRegion1");
+    HBaseAdmin admin = createTable(TABLENAME);
+
+    HRegionInfo info = null;
+    HRegionServer rs = TEST_UTIL.getRSForFirstRegionInTable(TABLENAME);
+    List<HRegionInfo> onlineRegions = rs.getOnlineRegions();
+    for (HRegionInfo regionInfo : onlineRegions) {
+      if (!regionInfo.isMetaRegion() && !regionInfo.isRootRegion()) {
+        if (regionInfo.getRegionNameAsString().contains("TestHBACloseRegion1")) {
+          info = regionInfo;
+          admin.closeRegionWithEncodedRegionName("sample", rs.getServerName()
+              .getServerName());
+        }
+      }
+    }
+    onlineRegions = rs.getOnlineRegions();
+    assertTrue("The region should be present in online regions list.",
+        onlineRegions.contains(info));
+  }
+
+  @Test
+  public void testCloseRegionThatFetchesTheHRIFromMeta() throws Exception {
+    byte[] TABLENAME = Bytes.toBytes("TestHBACloseRegion2");
+    HBaseAdmin admin = createTable(TABLENAME);
+
+    HRegionInfo info = null;
+    HRegionServer rs = TEST_UTIL.getRSForFirstRegionInTable(TABLENAME);
+    List<HRegionInfo> onlineRegions = rs.getOnlineRegions();
+    for (HRegionInfo regionInfo : onlineRegions) {
+      if (!regionInfo.isMetaRegion() && !regionInfo.isRootRegion()) {
+
+        if (regionInfo.getRegionNameAsString().contains("TestHBACloseRegion2")) {
+          info = regionInfo;
+          admin.closeRegion(regionInfo.getRegionNameAsString(), rs
+              .getServerName().getServerName());
+        }
+      }
+    }
+    Thread.sleep(1000);
+    onlineRegions = rs.getOnlineRegions();
+    assertFalse("The region should not be present in online regions list.",
+        onlineRegions.contains(info));
+  }
+
+  @Test
+  public void testCloseRegionWhenServerNameIsNull() throws Exception {
+    byte[] TABLENAME = Bytes.toBytes("TestHBACloseRegion3");
+    HBaseAdmin admin = createTable(TABLENAME);
+
+    HRegionServer rs = TEST_UTIL.getRSForFirstRegionInTable(TABLENAME);
+
+    try {
+      List<HRegionInfo> onlineRegions = rs.getOnlineRegions();
+      for (HRegionInfo regionInfo : onlineRegions) {
+        if (!regionInfo.isMetaRegion() && !regionInfo.isRootRegion()) {
+          if (regionInfo.getRegionNameAsString()
+              .contains("TestHBACloseRegion3")) {
+            admin.closeRegionWithEncodedRegionName(regionInfo.getEncodedName(),
+                null);
+          }
+        }
+      }
+      fail("The test should throw exception if the servername passed is null.");
+    } catch (IllegalArgumentException e) {
+    }
+  }
+  
+
+  @Test
+  public void testCloseRegionWhenServerNameIsEmpty() throws Exception {
+    byte[] TABLENAME = Bytes.toBytes("TestHBACloseRegionWhenServerNameIsEmpty");
+    HBaseAdmin admin = createTable(TABLENAME);
+
+    HRegionServer rs = TEST_UTIL.getRSForFirstRegionInTable(TABLENAME);
+
+    try {
+      List<HRegionInfo> onlineRegions = rs.getOnlineRegions();
+      for (HRegionInfo regionInfo : onlineRegions) {
+        if (!regionInfo.isMetaRegion() && !regionInfo.isRootRegion()) {
+          if (regionInfo.getRegionNameAsString()
+              .contains("TestHBACloseRegionWhenServerNameIsEmpty")) {
+            admin.closeRegionWithEncodedRegionName(regionInfo.getEncodedName(),
+                " ");
+          }
+        }
+      }
+      fail("The test should throw exception if the servername passed is empty.");
+    } catch (IllegalArgumentException e) {
+    }
+  }
+
+  @Test
+  public void testCloseRegionWhenEncodedRegionNameIsNotGiven() throws Exception {
+    byte[] TABLENAME = Bytes.toBytes("TestHBACloseRegion4");
+    HBaseAdmin admin = createTable(TABLENAME);
+
+    HRegionInfo info = null;
+    HRegionServer rs = TEST_UTIL.getRSForFirstRegionInTable(TABLENAME);
+
+    List<HRegionInfo> onlineRegions = rs.getOnlineRegions();
+    for (HRegionInfo regionInfo : onlineRegions) {
+      if (!regionInfo.isMetaRegion() && !regionInfo.isRootRegion()) {
+        if (regionInfo.getRegionNameAsString().contains("TestHBACloseRegion4")) {
+          info = regionInfo;
+          admin.closeRegionWithEncodedRegionName(regionInfo
+              .getRegionNameAsString(), rs.getServerName().getServerName());
+        }
+      }
+    }
+    onlineRegions = rs.getOnlineRegions();
+    assertTrue("The region should be present in online regions list.",
+        onlineRegions.contains(info));
+  }
+
+  private HBaseAdmin createTable(byte[] TABLENAME) throws IOException {
+
+    Configuration config = TEST_UTIL.getConfiguration();
+    HBaseAdmin admin = new HBaseAdmin(config);
+
+    HTableDescriptor htd = new HTableDescriptor(TABLENAME);
+    HColumnDescriptor hcd = new HColumnDescriptor("value");
+
+    htd.addFamily(hcd);
+    admin.createTable(htd, null);
+    return admin;
+  }
+
 
   @Test
   public void testHundredsOfTable() throws IOException{
@@ -860,5 +1163,120 @@ public class TestAdmin {
         expectedRegions, RegionInfos.size());
     
  }
+
+  @Test
+  public void testHLogRollWriting() throws Exception {
+    setUpforLogRolling();
+    String className = this.getClass().getName();
+    StringBuilder v = new StringBuilder(className);
+    while (v.length() < 1000) {
+      v.append(className);
+    }
+    byte[] value = Bytes.toBytes(v.toString());
+    HRegionServer regionServer = startAndWriteData("TestLogRolling", value);
+    LOG.info("after writing there are "
+        + TestHLogUtils.getNumLogFiles(regionServer.getWAL()) + " log files");
+
+    // flush all regions
+
+    List<HRegion> regions = new ArrayList<HRegion>(regionServer
+        .getOnlineRegionsLocalContext());
+    for (HRegion r : regions) {
+      r.flushcache();
+    }
+    admin.rollHLogWriter(regionServer.getServerName().getServerName());
+    int count = TestHLogUtils.getNumLogFiles(regionServer.getWAL());
+    LOG.info("after flushing all regions and rolling logs there are " +
+        count + " log files");
+    assertTrue(("actual count: " + count), count <= 2);
+  }
+
+  private void setUpforLogRolling() {
+    // Force a region split after every 768KB
+    TEST_UTIL.getConfiguration().setLong("hbase.hregion.max.filesize",
+        768L * 1024L);
+
+    // We roll the log after every 32 writes
+    TEST_UTIL.getConfiguration().setInt("hbase.regionserver.maxlogentries", 32);
+
+    TEST_UTIL.getConfiguration().setInt(
+        "hbase.regionserver.logroll.errors.tolerated", 2);
+    TEST_UTIL.getConfiguration().setInt("ipc.ping.interval", 10 * 1000);
+    TEST_UTIL.getConfiguration().setInt("ipc.socket.timeout", 10 * 1000);
+    TEST_UTIL.getConfiguration().setInt("hbase.rpc.timeout", 10 * 1000);
+
+    // For less frequently updated regions flush after every 2 flushes
+    TEST_UTIL.getConfiguration().setInt(
+        "hbase.hregion.memstore.optionalflushcount", 2);
+
+    // We flush the cache after every 8192 bytes
+    TEST_UTIL.getConfiguration().setInt("hbase.hregion.memstore.flush.size",
+        8192);
+
+    // Increase the amount of time between client retries
+    TEST_UTIL.getConfiguration().setLong("hbase.client.pause", 10 * 1000);
+
+    // Reduce thread wake frequency so that other threads can get
+    // a chance to run.
+    TEST_UTIL.getConfiguration().setInt(HConstants.THREAD_WAKE_FREQUENCY,
+        2 * 1000);
+
+    /**** configuration for testLogRollOnDatanodeDeath ****/
+    // make sure log.hflush() calls syncFs() to open a pipeline
+    TEST_UTIL.getConfiguration().setBoolean("dfs.support.append", true);
+    // lower the namenode & datanode heartbeat so the namenode
+    // quickly detects datanode failures
+    TEST_UTIL.getConfiguration().setInt("heartbeat.recheck.interval", 5000);
+    TEST_UTIL.getConfiguration().setInt("dfs.heartbeat.interval", 1);
+    // the namenode might still try to choose the recently-dead datanode
+    // for a pipeline, so try to a new pipeline multiple times
+    TEST_UTIL.getConfiguration().setInt("dfs.client.block.write.retries", 30);
+    TEST_UTIL.getConfiguration().setInt(
+        "hbase.regionserver.hlog.tolerable.lowreplication", 2);
+    TEST_UTIL.getConfiguration().setInt(
+        "hbase.regionserver.hlog.lowreplication.rolllimit", 3);
+  }
+  
+  private HRegionServer startAndWriteData(String tableName, byte[] value)
+      throws IOException {
+    // When the META table can be opened, the region servers are running
+    new HTable(TEST_UTIL.getConfiguration(), HConstants.META_TABLE_NAME);
+    HRegionServer regionServer = TEST_UTIL.getHbaseCluster()
+        .getRegionServerThreads().get(0).getRegionServer();
+
+    // Create the test table and open it
+    HTableDescriptor desc = new HTableDescriptor(tableName);
+    desc.addFamily(new HColumnDescriptor(HConstants.CATALOG_FAMILY));
+    admin.createTable(desc);
+    HTable table = new HTable(TEST_UTIL.getConfiguration(), tableName);
+
+    regionServer = TEST_UTIL.getRSForFirstRegionInTable(Bytes
+        .toBytes(tableName));
+    for (int i = 1; i <= 256; i++) { // 256 writes should cause 8 log rolls
+      Put put = new Put(Bytes.toBytes("row" + String.format("%1$04d", i)));
+      put.add(HConstants.CATALOG_FAMILY, null, value);
+      table.put(put);
+      if (i % 32 == 0) {
+        // After every 32 writes sleep to let the log roller run
+        try {
+          Thread.sleep(2000);
+        } catch (InterruptedException e) {
+          // continue
+        }
+      }
+    }
+    return regionServer;
+  }
+  
+  /**
+   * HBASE-4417 checkHBaseAvailable() doesn't close zk connections
+   */
+  @Test
+  public void testCheckHBaseAvailableClosesConnection() throws Exception {
+    Configuration conf = TEST_UTIL.getConfiguration();
+    for(int i=0; i<1000;i++) {
+      HBaseAdmin.checkHBaseAvailable(conf);
+    }
+  }
   
 }

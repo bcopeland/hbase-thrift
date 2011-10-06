@@ -136,6 +136,7 @@ public class SplitLogWorker extends ZooKeeperListener implements Runnable {
 
   @Override
   public void run() {
+   try {
     LOG.info("SplitLogWorker " + this.serverName + " starting");
     this.watcher.registerListener(this);
     int res;
@@ -162,8 +163,13 @@ public class SplitLogWorker extends ZooKeeperListener implements Runnable {
     }
 
     taskLoop();
-
-    LOG.info("SplitLogWorker " + this.serverName + " exiting");
+   } catch (Throwable t) {
+	   // only a logical error can cause here. Printing it out 
+	   // to make debugging easier
+	   LOG.error("unexpected error ", t);
+   } finally {
+	   LOG.info("SplitLogWorker " + this.serverName + " exiting");
+   }
   }
 
   /**
@@ -323,7 +329,7 @@ public class SplitLogWorker extends ZooKeeperListener implements Runnable {
    */
   private boolean ownTask(boolean isFirstTime) {
     try {
-      Stat stat = this.watcher.getZooKeeper().setData(currentTask,
+      Stat stat = this.watcher.getRecoverableZooKeeper().setData(currentTask,
           TaskState.TASK_OWNED.get(serverName), currentVersion);
       if (stat == null) {
         LOG.warn("zk.setData() returned null for path " + currentTask);
@@ -386,8 +392,9 @@ public class SplitLogWorker extends ZooKeeperListener implements Runnable {
   }
 
   void getDataSetWatchAsync() {
-    this.watcher.getZooKeeper().getData(currentTask, this.watcher,
-        new GetDataAsyncCallback(), null);
+    this.watcher.getRecoverableZooKeeper().getZooKeeper().
+      getData(currentTask, this.watcher,
+      new GetDataAsyncCallback(), null);
     tot_wkr_get_data_queued.incrementAndGet();
   }
 
@@ -407,8 +414,8 @@ public class SplitLogWorker extends ZooKeeperListener implements Runnable {
               ! TaskState.TASK_DONE.equals(data, serverName) &&
               ! TaskState.TASK_ERR.equals(data, serverName) &&
               ! TaskState.TASK_RESIGNED.equals(data, serverName)) {
-            LOG.info("task " + taskpath + " preempted from server " +
-                serverName + " ... current task state and owner - " +
+            LOG.info("task " + taskpath + " preempted from " +
+                serverName + ", current task state and owner=" +
                 new String(data));
             stopTask();
           }
@@ -530,6 +537,7 @@ public class SplitLogWorker extends ZooKeeperListener implements Runnable {
         getDataSetWatchFailure(path);
         return;
       }
+      data = watcher.getRecoverableZooKeeper().removeMetaData(data);
       getDataSetWatchSuccess(path, data);
       return;
     }

@@ -41,11 +41,11 @@ import org.apache.hadoop.hbase.Server;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.YouAreDeadException;
 import org.apache.hadoop.hbase.ZooKeeperConnectionException;
-import org.apache.hadoop.hbase.catalog.CatalogTracker;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.client.RetriesExhaustedException;
 import org.apache.hadoop.hbase.ipc.HRegionInterface;
+import org.apache.hadoop.hbase.regionserver.RegionOpeningState;
 import org.apache.hadoop.hbase.master.handler.MetaServerShutdownHandler;
 import org.apache.hadoop.hbase.master.handler.ServerShutdownHandler;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
@@ -169,7 +169,7 @@ public class ServerManager {
       LOG.info(message);
       if (existingServer.getStartcode() < serverName.getStartcode()) {
         LOG.info("Triggering server recovery; existingServer " +
-          existingServer + " looks stale");
+          existingServer + " looks stale, new server:" + serverName);
         expireServer(existingServer);
       }
       throw new PleaseHoldException(message);
@@ -218,8 +218,8 @@ public class ServerManager {
     if (this.deadservers.cleanPreviousInstance(serverName)) {
       // This server has now become alive after we marked it as dead.
       // We removed it's previous entry from the dead list to reflect it.
-      LOG.debug("Server " + serverName + " came back up, removed it from the" +
-          " dead servers list");
+      LOG.debug(what + ":" + " Server " + serverName + " came back up," +
+          " removed it from the dead servers list");
     }
   }
 
@@ -352,30 +352,15 @@ public class ServerManager {
       }
       return;
     }
-    CatalogTracker ct = this.master.getCatalogTracker();
-    // Was this server carrying root?
-    boolean carryingRoot;
-    try {
-      ServerName address = ct.getRootLocation();
-      carryingRoot = address.equals(serverName);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      LOG.info("Interrupted");
-      return;
-    }
-    // Was this server carrying meta?  Can't ask CatalogTracker because it
-    // may have reset the meta location as null already (it may have already
-    // run into fact that meta is dead).  I can ask assignment manager. It
-    // has an inmemory list of who has what.  This list will be cleared as we
-    // process the dead server but should be  find asking it now.
-    ServerName address = ct.getMetaLocation();
-    boolean carryingMeta = address.equals(serverName);
+
+    boolean carryingRoot = services.getAssignmentManager().isCarryingRoot(serverName);
+    boolean carryingMeta = services.getAssignmentManager().isCarryingMeta(serverName);
     if (carryingRoot || carryingMeta) {
       this.services.getExecutorService().submit(new MetaServerShutdownHandler(this.master,
         this.services, this.deadservers, serverName, carryingRoot, carryingMeta));
     } else {
       this.services.getExecutorService().submit(new ServerShutdownHandler(this.master,
-        this.services, this.deadservers, serverName));
+        this.services, this.deadservers, serverName, true));
     }
     LOG.debug("Added=" + serverName +
       " to dead servers, submitted shutdown handler to be executed, root=" +
@@ -391,16 +376,20 @@ public class ServerManager {
    * <p>
    * @param server server to open a region
    * @param region region to open
+   * @param versionOfOfflineNode that needs to be present in the offline node
+   * when RS tries to change the state from OFFLINE to other states.
    */
-  public void sendRegionOpen(final ServerName server, HRegionInfo region)
+  public RegionOpeningState sendRegionOpen(final ServerName server,
+      HRegionInfo region, int versionOfOfflineNode)
   throws IOException {
     HRegionInterface hri = getServerConnection(server);
     if (hri == null) {
       LOG.warn("Attempting to send OPEN RPC to server " + server.toString() +
         " failed because no RPC connection found to this server");
-      return;
+      return RegionOpeningState.FAILED_OPENING;
     }
-    hri.openRegion(region);
+    return (versionOfOfflineNode == -1) ? hri.openRegion(region) : hri
+        .openRegion(region, versionOfOfflineNode);
   }
 
   /**

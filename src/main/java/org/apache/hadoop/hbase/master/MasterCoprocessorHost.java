@@ -20,6 +20,8 @@
 
 package org.apache.hadoop.hbase.master;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.coprocessor.*;
@@ -34,6 +36,8 @@ import java.io.IOException;
 public class MasterCoprocessorHost
     extends CoprocessorHost<MasterCoprocessorHost.MasterEnvironment> {
 
+  private static final Log LOG = LogFactory.getLog(MasterCoprocessorHost.class);
+
   /**
    * Coprocessor environment extension providing access to master related
    * services.
@@ -42,9 +46,10 @@ public class MasterCoprocessorHost
       implements MasterCoprocessorEnvironment {
     private MasterServices masterServices;
 
-    public MasterEnvironment(Class<?> implClass, Coprocessor impl,
-        Coprocessor.Priority priority, int seq, MasterServices services) {
-      super(impl, priority, seq);
+    public MasterEnvironment(final Class<?> implClass, final Coprocessor impl,
+        final int priority, final int seq, final Configuration conf,
+        final MasterServices services) {
+      super(impl, priority, seq, conf);
       this.masterServices = services;
     }
 
@@ -57,24 +62,34 @@ public class MasterCoprocessorHost
 
   MasterCoprocessorHost(final MasterServices services, final Configuration conf) {
     this.masterServices = services;
-
     loadSystemCoprocessors(conf, MASTER_COPROCESSOR_CONF_KEY);
   }
 
   @Override
-  public MasterEnvironment createEnvironment(Class<?> implClass,
-      Coprocessor instance, Coprocessor.Priority priority, int seq) {
-    return new MasterEnvironment(implClass, instance, priority, seq, masterServices);
+  public MasterEnvironment createEnvironment(final Class<?> implClass,
+      final Coprocessor instance, final int priority, final int seq,
+      final Configuration conf) {
+    return new MasterEnvironment(implClass, instance, priority, seq, conf,
+        masterServices);
+  }
+
+  @Override
+  protected void abortServer(final CoprocessorEnvironment env, final Throwable e) {
+    abortServer("master", masterServices, env, e);
   }
 
   /* Implementation of hooks for invoking MasterObservers */
-  void preCreateTable(HTableDescriptor desc, byte[][] splitKeys)
-      throws IOException {
+  void preCreateTable(HTableDescriptor htd, HRegionInfo[] regions)
+    throws IOException {
     ObserverContext<MasterCoprocessorEnvironment> ctx = null;
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preCreateTable(ctx, desc, splitKeys);
+        try {
+          ((MasterObserver)env.getInstance()).preCreateTable(ctx, htd, regions);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -82,12 +97,17 @@ public class MasterCoprocessorHost
     }
   }
 
-  void postCreateTable(HRegionInfo[] regions, boolean sync) throws IOException {
+  void postCreateTable(HTableDescriptor htd, HRegionInfo[] regions)
+    throws IOException {
     ObserverContext<MasterCoprocessorEnvironment> ctx = null;
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postCreateTable(ctx, regions, sync);
+        try {
+            ((MasterObserver)env.getInstance()).postCreateTable(ctx, htd, regions);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -100,7 +120,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preDeleteTable(ctx, tableName);
+        try {
+          ((MasterObserver)env.getInstance()).preDeleteTable(ctx, tableName);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -113,7 +137,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postDeleteTable(ctx, tableName);
+        try {
+          ((MasterObserver)env.getInstance()).postDeleteTable(ctx, tableName);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -127,7 +155,12 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preModifyTable(ctx, tableName, htd);
+        try {
+          ((MasterObserver)env.getInstance()).preModifyTable(ctx, tableName,
+              htd);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -141,7 +174,12 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postModifyTable(ctx, tableName, htd);
+        try {
+          ((MasterObserver)env.getInstance()).postModifyTable(ctx, tableName,
+              htd);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -149,18 +187,25 @@ public class MasterCoprocessorHost
     }
   }
 
-  void preAddColumn(byte [] tableName, HColumnDescriptor column)
+  boolean preAddColumn(byte [] tableName, HColumnDescriptor column)
       throws IOException {
+    boolean bypass = false;
     ObserverContext<MasterCoprocessorEnvironment> ctx = null;
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preAddColumn(ctx, tableName, column);
+        try {
+          ((MasterObserver)env.getInstance()).preAddColumn(ctx, tableName, column);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
+        bypass |= ctx.shouldBypass();
         if (ctx.shouldComplete()) {
           break;
         }
       }
     }
+    return bypass;
   }
 
   void postAddColumn(byte [] tableName, HColumnDescriptor column)
@@ -169,7 +214,12 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postAddColumn(ctx, tableName, column);
+        try {
+          ((MasterObserver)env.getInstance()).postAddColumn(ctx, tableName,
+              column);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -177,19 +227,26 @@ public class MasterCoprocessorHost
     }
   }
 
-  void preModifyColumn(byte [] tableName, HColumnDescriptor descriptor)
+  boolean preModifyColumn(byte [] tableName, HColumnDescriptor descriptor)
       throws IOException {
+    boolean bypass = false;
     ObserverContext<MasterCoprocessorEnvironment> ctx = null;
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preModifyColumn(
+        try {
+          ((MasterObserver)env.getInstance()).preModifyColumn(
             ctx, tableName, descriptor);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
+        bypass |= ctx.shouldBypass();
         if (ctx.shouldComplete()) {
           break;
         }
       }
     }
+    return bypass;
   }
 
   void postModifyColumn(byte [] tableName, HColumnDescriptor descriptor)
@@ -198,8 +255,12 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postModifyColumn(
-            ctx, tableName, descriptor);
+        try {
+          ((MasterObserver)env.getInstance()).postModifyColumn(
+              ctx, tableName, descriptor);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -207,18 +268,25 @@ public class MasterCoprocessorHost
     }
   }
 
-  void preDeleteColumn(final byte [] tableName, final byte [] c)
+  boolean preDeleteColumn(final byte [] tableName, final byte [] c)
       throws IOException {
+    boolean bypass = false;
     ObserverContext<MasterCoprocessorEnvironment> ctx = null;
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preDeleteColumn(ctx, tableName, c);
+        try {
+          ((MasterObserver)env.getInstance()).preDeleteColumn(ctx, tableName, c);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
+        bypass |= ctx.shouldBypass();
         if (ctx.shouldComplete()) {
           break;
         }
       }
     }
+    return bypass;
   }
 
   void postDeleteColumn(final byte [] tableName, final byte [] c)
@@ -227,7 +295,12 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postDeleteColumn(ctx, tableName, c);
+        try {
+          ((MasterObserver)env.getInstance()).postDeleteColumn(ctx, tableName,
+              c);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -240,7 +313,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preEnableTable(ctx, tableName);
+        try {
+          ((MasterObserver)env.getInstance()).preEnableTable(ctx, tableName);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -253,7 +330,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postEnableTable(ctx, tableName);
+        try {
+          ((MasterObserver)env.getInstance()).postEnableTable(ctx, tableName);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -266,7 +347,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preDisableTable(ctx, tableName);
+        try {
+          ((MasterObserver)env.getInstance()).preDisableTable(ctx, tableName);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -279,7 +364,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postDisableTable(ctx, tableName);
+        try {
+          ((MasterObserver)env.getInstance()).postDisableTable(ctx, tableName);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -287,44 +376,58 @@ public class MasterCoprocessorHost
     }
   }
 
-  void preMove(final HRegionInfo region, final ServerName srcServer, final ServerName destServer)
-      throws UnknownRegionException {
-    ObserverContext<MasterCoprocessorEnvironment> ctx = null;
-    for (MasterEnvironment env: coprocessors) {
-      if (env.getInstance() instanceof MasterObserver) {
-        ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preMove(
-            ctx, region, srcServer, destServer);
-        if (ctx.shouldComplete()) {
-          break;
-        }
-      }
-    }
-  }
-
-  void postMove(final HRegionInfo region, final ServerName srcServer, final ServerName destServer)
-      throws UnknownRegionException {
-    ObserverContext<MasterCoprocessorEnvironment> ctx = null;
-    for (MasterEnvironment env: coprocessors) {
-      if (env.getInstance() instanceof MasterObserver) {
-        ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postMove(
-            ctx, region, srcServer, destServer);
-        if (ctx.shouldComplete()) {
-          break;
-        }
-      }
-    }
-  }
-
-  boolean preAssign(final byte [] regionName, final boolean force)
+  boolean preMove(final HRegionInfo region, final ServerName srcServer, final ServerName destServer)
       throws IOException {
     boolean bypass = false;
     ObserverContext<MasterCoprocessorEnvironment> ctx = null;
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preAssign(ctx, regionName, force);
+        try {
+          ((MasterObserver)env.getInstance()).preMove(
+              ctx, region, srcServer, destServer);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
+        bypass |= ctx.shouldBypass();
+        if (ctx.shouldComplete()) {
+          break;
+        }
+      }
+    }
+    return bypass;
+  }
+
+  void postMove(final HRegionInfo region, final ServerName srcServer, final ServerName destServer)
+      throws IOException {
+    ObserverContext<MasterCoprocessorEnvironment> ctx = null;
+    for (MasterEnvironment env: coprocessors) {
+      if (env.getInstance() instanceof MasterObserver) {
+        ctx = ObserverContext.createAndPrepare(env, ctx);
+        try {
+          ((MasterObserver)env.getInstance()).postMove(
+              ctx, region, srcServer, destServer);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
+        if (ctx.shouldComplete()) {
+          break;
+        }
+      }
+    }
+  }
+
+  boolean preAssign(final HRegionInfo regionInfo) throws IOException {
+    boolean bypass = false;
+    ObserverContext<MasterCoprocessorEnvironment> ctx = null;
+    for (MasterEnvironment env: coprocessors) {
+      if (env.getInstance() instanceof MasterObserver) {
+        ctx = ObserverContext.createAndPrepare(env, ctx);
+        try {
+          ((MasterObserver) env.getInstance()).preAssign(ctx, regionInfo);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         bypass |= ctx.shouldBypass();
         if (ctx.shouldComplete()) {
           break;
@@ -339,7 +442,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postAssign(ctx, regionInfo);
+        try {
+          ((MasterObserver)env.getInstance()).postAssign(ctx, regionInfo);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -347,15 +454,19 @@ public class MasterCoprocessorHost
     }
   }
 
-  boolean preUnassign(final byte [] regionName, final boolean force)
+  boolean preUnassign(final HRegionInfo regionInfo, final boolean force)
       throws IOException {
     boolean bypass = false;
     ObserverContext<MasterCoprocessorEnvironment> ctx = null;
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preUnassign(
-            ctx, regionName, force);
+        try {
+          ((MasterObserver)env.getInstance()).preUnassign(
+              ctx, regionInfo, force);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         bypass |= ctx.shouldBypass();
         if (ctx.shouldComplete()) {
           break;
@@ -371,8 +482,12 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postUnassign(
-            ctx, regionInfo, force);
+        try {
+          ((MasterObserver)env.getInstance()).postUnassign(
+              ctx, regionInfo, force);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -386,7 +501,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preBalance(ctx);
+        try {
+          ((MasterObserver)env.getInstance()).preBalance(ctx);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         bypass |= ctx.shouldBypass();
         if (ctx.shouldComplete()) {
           break;
@@ -401,7 +520,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postBalance(ctx);
+        try {
+          ((MasterObserver)env.getInstance()).postBalance(ctx);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -415,8 +538,12 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        balance = ((MasterObserver)env.getInstance()).preBalanceSwitch(
-            ctx, balance);
+        try {
+          balance = ((MasterObserver)env.getInstance()).preBalanceSwitch(
+              ctx, balance);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -431,8 +558,12 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).postBalanceSwitch(
-            ctx, oldValue, newValue);
+        try {
+          ((MasterObserver)env.getInstance()).postBalanceSwitch(
+              ctx, oldValue, newValue);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -445,7 +576,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preShutdown(ctx);
+        try {
+          ((MasterObserver)env.getInstance()).preShutdown(ctx);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -458,7 +593,11 @@ public class MasterCoprocessorHost
     for (MasterEnvironment env: coprocessors) {
       if (env.getInstance() instanceof MasterObserver) {
         ctx = ObserverContext.createAndPrepare(env, ctx);
-        ((MasterObserver)env.getInstance()).preStopMaster(ctx);
+        try {
+          ((MasterObserver)env.getInstance()).preStopMaster(ctx);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
         if (ctx.shouldComplete()) {
           break;
         }
@@ -466,4 +605,20 @@ public class MasterCoprocessorHost
     }
   }
 
+  void postStartMaster() throws IOException {
+    ObserverContext<MasterCoprocessorEnvironment> ctx = null;
+    for (MasterEnvironment env: coprocessors) {
+      if (env.getInstance() instanceof MasterObserver) {
+        ctx = ObserverContext.createAndPrepare(env, ctx);
+        try {
+          ((MasterObserver)env.getInstance()).postStartMaster(ctx);
+        } catch (Throwable e) {
+          handleCoprocessorThrowable(env, e);
+        }
+        if (ctx.shouldComplete()) {
+          break;
+        }
+      }
+    }
+  }
 }

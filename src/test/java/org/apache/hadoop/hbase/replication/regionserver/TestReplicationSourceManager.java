@@ -43,7 +43,7 @@ import org.apache.hadoop.hbase.catalog.CatalogTracker;
 import org.apache.hadoop.hbase.regionserver.wal.HLog;
 import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
-import org.apache.hadoop.hbase.regionserver.wal.WALObserver;
+import org.apache.hadoop.hbase.regionserver.wal.WALActionsListener;
 import org.apache.hadoop.hbase.replication.ReplicationSourceDummy;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
@@ -81,6 +81,8 @@ public class TestReplicationSourceManager {
 
   private static final byte[] test = Bytes.toBytes("test");
 
+  private static final String slaveId = "1";
+
   private static FileSystem fs;
 
   private static Path oldLogDir;
@@ -115,7 +117,7 @@ public class TestReplicationSourceManager {
     logDir = new Path(utility.getTestDir(),
         HConstants.HREGION_LOGDIR_NAME);
 
-    manager.addSource("1");
+    manager.addSource(slaveId);
 
     htd = new HTableDescriptor(test);
     HColumnDescriptor col = new HColumnDescriptor("f1");
@@ -125,7 +127,7 @@ public class TestReplicationSourceManager {
     col.setScope(HConstants.REPLICATION_SCOPE_LOCAL);
     htd.addFamily(col);
 
-    hri = new HRegionInfo(htd, r1, r2);
+    hri = new HRegionInfo(htd.getName(), r1, r2);
 
 
   }
@@ -156,22 +158,23 @@ public class TestReplicationSourceManager {
     WALEdit edit = new WALEdit();
     edit.add(kv);
 
-    List<WALObserver> listeners = new ArrayList<WALObserver>();
+    List<WALActionsListener> listeners = new ArrayList<WALActionsListener>();
     listeners.add(replication);
     HLog hlog = new HLog(fs, logDir, oldLogDir, conf, listeners,
       URLEncoder.encode("regionserver:60020", "UTF8"));
 
     manager.init();
-
+    HTableDescriptor htd = new HTableDescriptor();
+    htd.addFamily(new HColumnDescriptor(f1));
     // Testing normal log rolling every 20
     for(long i = 1; i < 101; i++) {
       if(i > 1 && i % 20 == 0) {
         hlog.rollWriter();
       }
       LOG.info(i);
-      HLogKey key = new HLogKey(hri.getRegionName(),
-        test, seq++, System.currentTimeMillis());
-      hlog.append(hri, key, edit);
+      HLogKey key = new HLogKey(hri.getRegionName(), test, seq++,
+          System.currentTimeMillis(), HConstants.DEFAULT_CLUSTER_ID);
+      hlog.append(hri, key, edit, htd, true);
     }
 
     // Simulate a rapid insert that's followed
@@ -182,21 +185,21 @@ public class TestReplicationSourceManager {
     LOG.info(baseline + " and " + time);
 
     for (int i = 0; i < 3; i++) {
-      HLogKey key = new HLogKey(hri.getRegionName(),
-        test, seq++, System.currentTimeMillis());
-      hlog.append(hri, key, edit);
+      HLogKey key = new HLogKey(hri.getRegionName(), test, seq++,
+          System.currentTimeMillis(), HConstants.DEFAULT_CLUSTER_ID);
+      hlog.append(hri, key, edit, htd, true);
     }
 
-    assertEquals(6, manager.getHLogs().size());
+    assertEquals(6, manager.getHLogs().get(slaveId).size());
 
     hlog.rollWriter();
 
     manager.logPositionAndCleanOldLogs(manager.getSources().get(0).getCurrentPath(),
         "1", 0, false);
 
-    HLogKey key = new HLogKey(hri.getRegionName(),
-          test, seq++, System.currentTimeMillis());
-    hlog.append(hri, key, edit);
+    HLogKey key = new HLogKey(hri.getRegionName(), test, seq++,
+        System.currentTimeMillis(), HConstants.DEFAULT_CLUSTER_ID);
+    hlog.append(hri, key, edit, htd, true);
 
     assertEquals(1, manager.getHLogs().size());
 
@@ -229,6 +232,11 @@ public class TestReplicationSourceManager {
     @Override
     public void abort(String why, Throwable e) {
       //To change body of implemented methods use File | Settings | File Templates.
+    }
+    
+    @Override
+    public boolean isAborted() {
+      return false;
     }
 
     @Override

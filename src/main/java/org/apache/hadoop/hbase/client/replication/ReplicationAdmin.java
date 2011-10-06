@@ -21,6 +21,7 @@ package org.apache.hadoop.hbase.client.replication;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.Map;
 
 import org.apache.commons.lang.NotImplementedException;
 import org.apache.hadoop.conf.Configuration;
@@ -67,7 +68,6 @@ import org.apache.zookeeper.KeeperException;
 public class ReplicationAdmin implements Closeable {
 
   private final ReplicationZookeeper replicationZk;
-  private final Configuration configuration;
   private final HConnection connection;
 
   /**
@@ -81,7 +81,6 @@ public class ReplicationAdmin implements Closeable {
       throw new RuntimeException("hbase.replication isn't true, please " +
           "enable it in order to use replication");
     }
-    this.configuration = conf;
     this.connection = HConnectionManager.getConnection(conf);
     ZooKeeperWatcher zkw = this.connection.getZooKeeperWatcher();
     try {
@@ -133,6 +132,14 @@ public class ReplicationAdmin implements Closeable {
    */
   public int getPeersCount() {
     return this.replicationZk.listPeersIdsAndWatch().size();
+  }
+
+  /**
+   * Map of this cluster's peers for display.
+   * @return A map of peer ids to peer cluster keys
+   */
+  public Map<String, String> listPeers() {
+    return this.replicationZk.listPeers();
   }
 
   /**

@@ -20,6 +20,7 @@
 
 package org.apache.hadoop.hbase.regionserver;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
@@ -42,9 +43,9 @@ public class TestExplicitColumnTracker extends HBaseTestCase {
   private void runTest(int maxVersions,
                        TreeSet<byte[]> trackColumns,
                        List<byte[]> scannerColumns,
-                       List<MatchCode> expected) {
+                       List<MatchCode> expected) throws IOException {
     ColumnTracker exp = new ExplicitColumnTracker(
-      trackColumns, maxVersions);
+      trackColumns, 0, maxVersions, Long.MAX_VALUE);
 
 
     //Initialize result
@@ -66,7 +67,7 @@ public class TestExplicitColumnTracker extends HBaseTestCase {
     }
   }
 
-  public void testGet_SingleVersion(){
+  public void testGet_SingleVersion() throws IOException{
     if(PRINT){
       System.out.println("SingleVersion");
     }
@@ -77,11 +78,11 @@ public class TestExplicitColumnTracker extends HBaseTestCase {
     columns.add(col2);
     columns.add(col4);
     List<MatchCode> expected = new ArrayList<ScanQueryMatcher.MatchCode>();
-    expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);
-    expected.add(ScanQueryMatcher.MatchCode.INCLUDE);
-    expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);
-    expected.add(ScanQueryMatcher.MatchCode.INCLUDE);
-    expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_ROW);
+    expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);             // col1
+    expected.add(ScanQueryMatcher.MatchCode.INCLUDE_AND_SEEK_NEXT_COL); // col2
+    expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);             // col3    
+    expected.add(ScanQueryMatcher.MatchCode.INCLUDE_AND_SEEK_NEXT_ROW); // col4
+    expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_ROW);             // col5    
     int maxVersions = 1;
 
     //Create "Scanner"
@@ -95,7 +96,7 @@ public class TestExplicitColumnTracker extends HBaseTestCase {
     runTest(maxVersions, columns, scanner, expected);
   }
 
-  public void testGet_MultiVersion(){
+  public void testGet_MultiVersion() throws IOException{
     if(PRINT){
       System.out.println("\nMultiVersion");
     }
@@ -111,16 +112,16 @@ public class TestExplicitColumnTracker extends HBaseTestCase {
     expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);
     expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);
 
-    expected.add(ScanQueryMatcher.MatchCode.INCLUDE);
-    expected.add(ScanQueryMatcher.MatchCode.INCLUDE);
+    expected.add(ScanQueryMatcher.MatchCode.INCLUDE);                   // col2; 1st version
+    expected.add(ScanQueryMatcher.MatchCode.INCLUDE_AND_SEEK_NEXT_COL); // col2; 2nd version
     expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);
 
     expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);
     expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);
     expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_COL);
 
-    expected.add(ScanQueryMatcher.MatchCode.INCLUDE);
-    expected.add(ScanQueryMatcher.MatchCode.INCLUDE);
+    expected.add(ScanQueryMatcher.MatchCode.INCLUDE);                   // col4; 1st version
+    expected.add(ScanQueryMatcher.MatchCode.INCLUDE_AND_SEEK_NEXT_ROW); // col4; 2nd version
     expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_ROW);
 
     expected.add(ScanQueryMatcher.MatchCode.SEEK_NEXT_ROW);
@@ -154,14 +155,15 @@ public class TestExplicitColumnTracker extends HBaseTestCase {
   /**
    * hbase-2259
    */
-  public void testStackOverflow(){
+  public void testStackOverflow() throws IOException{
     int maxVersions = 1;
     TreeSet<byte[]> columns = new TreeSet<byte[]>(Bytes.BYTES_COMPARATOR);
     for (int i = 0; i < 100000; i++) {
       columns.add(Bytes.toBytes("col"+i));
     }
 
-    ColumnTracker explicit = new ExplicitColumnTracker(columns, maxVersions);
+    ColumnTracker explicit = new ExplicitColumnTracker(columns, 0, maxVersions,
+        Long.MAX_VALUE);
     for (int i = 0; i < 100000; i+=2) {
       byte [] col = Bytes.toBytes("col"+i);
       explicit.checkColumn(col, 0, col.length, 1);
@@ -177,7 +179,7 @@ public class TestExplicitColumnTracker extends HBaseTestCase {
   /**
    * Regression test for HBASE-2545
    */
-  public void testInfiniteLoop() {
+  public void testInfiniteLoop() throws IOException {
     TreeSet<byte[]> columns = new TreeSet<byte[]>(Bytes.BYTES_COMPARATOR);
     columns.addAll(Arrays.asList(new byte[][] {
       col2, col3, col5 }));

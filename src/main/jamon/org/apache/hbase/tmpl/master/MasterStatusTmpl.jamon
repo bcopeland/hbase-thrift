@@ -24,7 +24,10 @@ Map<String, Integer> frags = null;
 ServerName rootLocation = null;
 ServerName metaLocation = null;
 List<ServerName> servers = null;
+Set<ServerName> deadServers = null;
 boolean showAppendWarning = false;
+String filter = "general";
+String format = "html";
 </%args>
 <%import>
 java.util.*;
@@ -40,6 +43,10 @@ org.apache.hadoop.hbase.client.HBaseAdmin;
 org.apache.hadoop.hbase.client.HConnectionManager;
 org.apache.hadoop.hbase.HTableDescriptor;
 </%import>
+<%if format.equals("json") %>
+  <& ../common/TaskMonitorTmpl; filter = filter; format = "json" &>
+  <%java return; %>
+</%if>
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" 
   "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"> 
@@ -49,9 +56,14 @@ org.apache.hadoop.hbase.HTableDescriptor;
 <link rel="stylesheet" type="text/css" href="/static/hbase.css" />
 </head>
 <body>
-<a id="logo" href="http://wiki.apache.org/lucene-hadoop/Hbase"><img src="/static/hbase_logo_med.gif" alt="HBase Logo" title="HBase Logo" /></a>
+<a id="logo" href="http://wiki.apache.org/lucene-hadoop/Hbase"><img src="/static/hbase_logo.png" alt="HBase Logo" title="HBase Logo" /></a>
 <h1 id="page_title">Master: <% master.getServerName().getHostname() %>:<% master.getServerName().getPort() %></h1>
-<p id="links_menu"><a href="/logs/">Local logs</a>, <a href="/stacks">Thread Dump</a>, <a href="/logLevel">Log Level</a></p>
+<p id="links_menu">
+  <a href="/logs/">Local logs</a>,
+  <a href="/stacks">Thread Dump</a>,
+  <a href="/logLevel">Log Level</a>,
+  <a href="/dump">Debug dump</a>
+</p>
 
 <!-- Various warnings that cluster admins should be aware of -->
 <%if JvmVersion.isBadJvmVersion() %>
@@ -89,7 +101,7 @@ org.apache.hadoop.hbase.HTableDescriptor;
 <tr><td>Zookeeper Quorum</td><td><% master.getZooKeeperWatcher().getQuorum() %></td><td>Addresses of all registered ZK servers. For more, see <a href="/zk.jsp">zk dump</a>.</td></tr>
 </table>
 
-<& ../common/TaskMonitorTmpl &>
+<& ../common/TaskMonitorTmpl; filter = filter &>
 
 <%if (rootLocation != null) %>
 <& catalogTables &>
@@ -99,6 +111,9 @@ org.apache.hadoop.hbase.HTableDescriptor;
 </%if>
 <%if (servers != null) %>
 <& regionServers &>
+</%if>
+<%if (deadServers != null) %>
+<& deadRegionServers &>
 </%if>
 
 <& AssignmentManagerStatusTmpl; assignmentManager=master.getAssignmentManager()&>
@@ -158,11 +173,11 @@ org.apache.hadoop.hbase.HTableDescriptor;
     <%if (frags != null) %>
         <td align="center"><% frags.get(htDesc.getNameAsString()) != null ? frags.get(htDesc.getNameAsString()).intValue() + "%" : "n/a" %></td>
     </%if>
-    <td><% htDesc.toString() %></td>
+    <td><% htDesc.toStringCustomizedValues() %></td>
 </tr>
 </%for>
 
-<p> <% tables.length %> table(s) in set.</p>
+<p> <% tables.length %> table(s) in set. [<a href=tablesDetailed.jsp>Details</a>]</p>
 </table>
 </%if>
 </%def>
@@ -198,9 +213,32 @@ org.apache.hadoop.hbase.HTableDescriptor;
 <%java>
     }
 </%java>
-<tr><th>Total: </th><td>servers: <% servers.size() %></td><td>&nbsp;</td><td>requests=<% totalRequests %>, regions=<% totalRegions %></td></tr>
+<tr><th>Total: </th><td>servers: <% servers.size() %></td><td>&nbsp;</td><td>requestsPerSecond=<% totalRequests %>, numberOfOnlineRegions=<% totalRegions %></td></tr>
 </table>
 
 <p>Load is requests per second and count of regions loaded</p>
+</%if>
+</%def>
+
+<%def deadRegionServers>
+<h2>Dead Region Servers</h2>
+<%if (deadServers != null && deadServers.size() > 0)%>
+
+<table>
+<tr><th rowspan="<% deadServers.size() + 1%>"></th><th>Address</th><th>Start Code</th></tr>
+<%java>
+   ServerName [] deadServerNames = deadServers.toArray(new ServerName[deadServers.size()]);
+     Arrays.sort(deadServerNames);
+     for (ServerName deadServerName: deadServerNames) {
+       int infoPort = master.getConfiguration().getInt("hbase.regionserver.info.port", 60030);
+       String hostname = deadServerName.getHostname() + ":" + infoPort;
+       long startcode = deadServerName.getStartcode();
+</%java>
+<tr><td><% hostname %></td><td><% startcode %></tr>
+<%java>
+    }
+</%java>
+<tr><th>Total: </th><td>servers: <% deadServers.size() %></td></tr>
+</table>
 </%if>
 </%def>

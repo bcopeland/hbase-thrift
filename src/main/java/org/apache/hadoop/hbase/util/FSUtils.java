@@ -22,6 +22,7 @@ package org.apache.hadoop.hbase.util;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
@@ -29,39 +30,50 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.HDFSBlocksDistribution;
 import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.RemoteExceptionHandler;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
-import org.apache.hadoop.hdfs.protocol.AlreadyBeingCreatedException;
 import org.apache.hadoop.hdfs.protocol.FSConstants;
-import org.apache.hadoop.hdfs.server.namenode.LeaseExpiredException;
 import org.apache.hadoop.io.SequenceFile;
+import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.StringUtils;
 
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InterruptedIOException;
-import java.lang.reflect.InvocationTargetException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Utility methods for interacting with the underlying file system.
  */
-public class FSUtils {
+public abstract class FSUtils {
   private static final Log LOG = LogFactory.getLog(FSUtils.class);
 
-  /**
-   * Not instantiable
-   */
-  private FSUtils() {
+  protected FSUtils() {
     super();
+  }
+  
+  public static FSUtils getInstance(FileSystem fs, Configuration conf) {
+    String scheme = fs.getUri().getScheme();
+    if (scheme == null) {
+      LOG.warn("Could not find scheme for uri " + 
+          fs.getUri() + ", default to hdfs");
+      scheme = "hdfs";
+    }
+    Class<?> fsUtilsClass = conf.getClass("hbase.fsutil." +
+        scheme + ".impl", FSHDFSUtils.class); // Default to HDFS impl
+    FSUtils fsUtils = (FSUtils)ReflectionUtils.newInstance(fsUtilsClass, conf);
+    return fsUtils;
   }
 
   /**
@@ -479,6 +491,46 @@ public class FSUtils {
   }
 
   /**
+   * Checks if .tableinfo exists for given table
+   * 
+   * @param fs file system
+   * @param rootdir root directory of HBase installation
+   * @param tableName name of table
+   * @return true if exists
+   * @throws IOException
+   */
+  public static boolean tableInfoExists(FileSystem fs, Path rootdir,
+      String tableName) throws IOException {
+    Path tablePath = getTableInfoPath(rootdir, tableName);
+    return fs.exists(tablePath);
+  }
+
+  /**
+   * Compute HDFS blocks distribution of a given file, or a portion of the file
+   * @param fs file system
+   * @param FileStatus file status of the file
+   * @param start start position of the portion
+   * @param length length of the portion 
+   * @return The HDFS blocks distribution
+   */  
+  static public HDFSBlocksDistribution computeHDFSBlocksDistribution(
+    final FileSystem fs, FileStatus status, long start, long length)
+    throws IOException {
+    HDFSBlocksDistribution blocksDistribution = new HDFSBlocksDistribution();
+    BlockLocation [] blockLocations =
+      fs.getFileBlockLocations(status, start, length);
+    for(BlockLocation bl : blockLocations) {
+      String [] hosts = bl.getHosts();
+      long len = bl.getLength();
+      blocksDistribution.addHostsAndBlockWeight(hosts, len);
+    }
+    
+    return blocksDistribution;
+  }
+  
+
+  
+  /**
    * Runs through the hbase rootdir and checks all stores have only
    * one file in them -- that is, they've been major compacted.  Looks
    * at root and meta tables too.
@@ -707,13 +759,17 @@ public class FSUtils {
     }
 
     public boolean accept(Path p) {
-      boolean isdir = false;
+      boolean isValid = false;
       try {
-        isdir = this.fs.getFileStatus(p).isDir();
+        if (HConstants.HBASE_NON_USER_TABLE_DIRS.contains(p)) {
+          isValid = false;
+        } else {
+            isValid = this.fs.getFileStatus(p).isDir();
+        }
       } catch (IOException e) {
         e.printStackTrace();
       }
-      return isdir;
+      return isValid;
     }
   }
 
@@ -737,9 +793,12 @@ public class FSUtils {
       } catch (NoSuchMethodException e) {
         append = false;
       }
-    } else {
+    }
+    if (!append) {
+      // Look for the 0.21, 0.22, new-style append evidence.
       try {
         FSDataOutputStream.class.getMethod("hflush", new Class<?> []{});
+        append = true;
       } catch (NoSuchMethodException e) {
         append = false;
       }
@@ -758,76 +817,349 @@ public class FSUtils {
     return scheme.equalsIgnoreCase("hdfs");
   }
 
-  /*
-   * Recover file lease. Used when a file might be suspect to be had been left open by another process. <code>p</code>
-   * @param fs
-   * @param p
-   * @param append True if append supported
+  /**
+   * Recover file lease. Used when a file might be suspect 
+   * to be had been left open by another process.
+   * @param fs FileSystem handle
+   * @param p Path of file to recover lease
+   * @param conf Configuration handle
    * @throws IOException
    */
-  public static void recoverFileLease(final FileSystem fs, final Path p, Configuration conf)
-  throws IOException{
-    if (!isAppendSupported(conf)) {
-      LOG.warn("Running on HDFS without append enabled may result in data loss");
-      return;
-    }
-    // lease recovery not needed for local file system case.
-    // currently, local file system doesn't implement append either.
-    if (!(fs instanceof DistributedFileSystem)) {
-      return;
-    }
-    LOG.info("Recovering file " + p);
-    long startWaiting = System.currentTimeMillis();
-
-    // Trying recovery
-    boolean recovered = false;
-    while (!recovered) {
-      try {
-        try {
-          if (fs instanceof DistributedFileSystem) {
-            DistributedFileSystem dfs = (DistributedFileSystem)fs;
-            DistributedFileSystem.class.getMethod("recoverLease",
-              new Class[] {Path.class}).invoke(dfs, p);
-          } else {
-            throw new Exception("Not a DistributedFileSystem");
-          }
-        } catch (InvocationTargetException ite) {
-          // function was properly called, but threw it's own exception
-          throw (IOException) ite.getCause();
-        } catch (Exception e) {
-          LOG.debug("Failed fs.recoverLease invocation, " + e.toString() +
-            ", trying fs.append instead");
-          FSDataOutputStream out = fs.append(p);
-          out.close();
-        }
-        recovered = true;
-      } catch (IOException e) {
-        e = RemoteExceptionHandler.checkIOException(e);
-        if (e instanceof AlreadyBeingCreatedException) {
-          // We expect that we'll get this message while the lease is still
-          // within its soft limit, but if we get it past that, it means
-          // that the RS is holding onto the file even though it lost its
-          // znode. We could potentially abort after some time here.
-          long waitedFor = System.currentTimeMillis() - startWaiting;
-          if (waitedFor > FSConstants.LEASE_SOFTLIMIT_PERIOD) {
-            LOG.warn("Waited " + waitedFor + "ms for lease recovery on " + p +
-              ":" + e.getMessage());
-          }
-        } else if (e instanceof LeaseExpiredException &&
-            e.getMessage().contains("File does not exist")) {
-          // This exception comes out instead of FNFE, fix it
-          throw new FileNotFoundException(
-              "The given HLog wasn't found at " + p.toString());
-        } else {
-          throw new IOException("Failed to open " + p + " for append", e);
-        }
-      }
-      try {
-        Thread.sleep(1000);
-      } catch (InterruptedException ex) {
-        new InterruptedIOException().initCause(ex);
+  public abstract void recoverFileLease(final FileSystem fs, final Path p,
+      Configuration conf) throws IOException;
+  
+  /**
+   * @param fs
+   * @param rootdir
+   * @return All the table directories under <code>rootdir</code>. Ignore non table hbase folders such as
+   * .logs, .oldlogs, .corrupt, .META., and -ROOT- folders.
+   * @throws IOException
+   */
+  public static List<Path> getTableDirs(final FileSystem fs, final Path rootdir)
+  throws IOException {
+    // presumes any directory under hbase.rootdir is a table
+    FileStatus [] dirs = fs.listStatus(rootdir, new DirFilter(fs));
+    List<Path> tabledirs = new ArrayList<Path>(dirs.length);
+    for (FileStatus dir: dirs) {
+      Path p = dir.getPath();
+      String tableName = p.getName();
+      if (!HConstants.HBASE_NON_USER_TABLE_DIRS.contains(tableName)) {
+        tabledirs.add(p);
       }
     }
-    LOG.info("Finished lease recover attempt for " + p);
+    return tabledirs;
   }
+
+  /**
+   * Get table info path for a table.
+   * @param rootdir
+   * @param tableName
+   * @return Table info path
+   */
+  private static Path getTableInfoPath(Path rootdir, String tablename) {
+    Path tablePath = getTablePath(rootdir, tablename);
+    return new Path(tablePath, HConstants.TABLEINFO_NAME);
+  }
+
+  /**
+   * @param fs
+   * @param rootdir
+   * @param tablename
+   * @return Modification time for the table {@link HConstants#TABLEINFO_NAME} file.
+   * @throws IOException
+   */
+  public static long getTableInfoModtime(final FileSystem fs, final Path rootdir,
+      final String tablename)
+  throws IOException {
+    Path p = getTableInfoPath(rootdir, tablename);
+    FileStatus [] status = fs.listStatus(p);
+    if (status == null || status.length < 1) {
+        throw new FileNotFoundException("No status for " + p.toString());
+    }
+    return status[0].getModificationTime();
+  }
+
+  public static Path getTablePath(Path rootdir, byte [] tableName) {
+    return getTablePath(rootdir, Bytes.toString(tableName));
+  }
+
+  public static Path getTablePath(Path rootdir, final String tableName) {
+    return new Path(rootdir, tableName);
+  }
+
+  private static FileSystem getCurrentFileSystem(Configuration conf)
+  throws IOException {
+    return getRootDir(conf).getFileSystem(conf);
+  }
+
+  /**
+   * Get HTableDescriptor
+   * @param config
+   * @param tableName
+   * @return HTableDescriptor for table
+   * @throws IOException
+   */
+  public static HTableDescriptor getHTableDescriptor(Configuration config,
+      String tableName)
+  throws IOException {
+    Path path = getRootDir(config);
+    FileSystem fs = path.getFileSystem(config);
+    return getTableDescriptor(fs, path, tableName);
+  }
+
+  /**
+   * Get HTD from HDFS.
+   * @param fs
+   * @param hbaseRootDir
+   * @param tableName
+   * @return Descriptor or null if none found.
+   * @throws IOException
+   */
+  public static HTableDescriptor getTableDescriptor(FileSystem fs,
+      Path hbaseRootDir, byte[] tableName)
+  throws IOException {
+     return getTableDescriptor(fs, hbaseRootDir, Bytes.toString(tableName));
+  }
+
+  public static HTableDescriptor getTableDescriptor(FileSystem fs,
+      Path hbaseRootDir, String tableName) {
+    HTableDescriptor htd = null;
+    try {
+      htd = getTableDescriptor(fs, getTablePath(hbaseRootDir, tableName));
+    } catch (NullPointerException e) {
+      LOG.debug("Exception during readTableDecriptor. Current table name = " +
+        tableName , e);
+    } catch (IOException ioe) {
+      LOG.debug("Exception during readTableDecriptor. Current table name = " +
+        tableName , ioe);
+    }
+    return htd;
+  }
+
+  public static HTableDescriptor getTableDescriptor(FileSystem fs, Path tableDir)
+  throws IOException, NullPointerException {
+    if (tableDir == null) throw new NullPointerException();
+    Path tableinfo = new Path(tableDir, HConstants.TABLEINFO_NAME);
+    FSDataInputStream fsDataInputStream = fs.open(tableinfo);
+    HTableDescriptor hTableDescriptor = null;
+    try {
+      hTableDescriptor = new HTableDescriptor();
+      hTableDescriptor.readFields(fsDataInputStream);
+    } finally {
+      fsDataInputStream.close();
+    }
+    return hTableDescriptor;
+  }
+
+  /**
+   * Create new HTableDescriptor in HDFS. Happens when we are creating table.
+   * 
+   * @param htableDescriptor
+   * @param conf
+   */
+  public static boolean createTableDescriptor(
+      HTableDescriptor htableDescriptor, Configuration conf) throws IOException {
+    return createTableDescriptor(htableDescriptor, conf, false);
+  }
+
+  /**
+   * Create new HTableDescriptor in HDFS. Happens when we are creating table. If
+   * forceCreation is true then even if previous table descriptor is present it
+   * will be overwritten
+   * 
+   * @param htableDescriptor
+   * @param conf
+   * @param forceCreation
+   */
+  public static boolean createTableDescriptor(
+      HTableDescriptor htableDescriptor, Configuration conf,
+      boolean forceCreation) throws IOException {
+    FileSystem fs = getCurrentFileSystem(conf);
+    return createTableDescriptor(fs, getRootDir(conf), htableDescriptor,
+        forceCreation);
+  }
+
+  /**
+   * Create new HTableDescriptor in HDFS. Happens when we are creating table.
+   * 
+   * @param fs
+   * @param htableDescriptor
+   * @param rootdir
+   */
+  public static boolean createTableDescriptor(FileSystem fs, Path rootdir,
+      HTableDescriptor htableDescriptor) throws IOException {
+    return createTableDescriptor(fs, rootdir, htableDescriptor, false);
+  }
+
+  /**
+   * Create new HTableDescriptor in HDFS. Happens when we are creating table. If
+   * forceCreation is true then even if previous table descriptor is present it
+   * will be overwritten
+   * 
+   * @param fs
+   * @param htableDescriptor
+   * @param rootdir
+   * @param forceCreation
+   */
+  public static boolean createTableDescriptor(FileSystem fs, Path rootdir,
+      HTableDescriptor htableDescriptor, boolean forceCreation)
+      throws IOException {
+    Path tableInfoPath = getTableInfoPath(rootdir, htableDescriptor
+        .getNameAsString());
+    LOG.info("Current tableInfoPath = " + tableInfoPath);
+    if (!forceCreation) {
+      if (fs.exists(tableInfoPath)
+          && fs.getFileStatus(tableInfoPath).getLen() > 0) {
+        LOG.info("TableInfo already exists.. Skipping creation");
+        return false;
+      }
+    }
+    writeTableDescriptor(fs, htableDescriptor, getTablePath(rootdir,
+        htableDescriptor.getNameAsString()), forceCreation);
+
+    return true;
+  }
+
+  /**
+   * Deletes a table's directory from the file system if exists. Used in unit
+   * tests.
+   */
+  public static void deleteTableDescriptorIfExists(String tableName,
+      Configuration conf) throws IOException {
+    FileSystem fs = getCurrentFileSystem(conf);
+    Path tableInfoPath = getTableInfoPath(getRootDir(conf), tableName);
+    if (fs.exists(tableInfoPath))
+      deleteDirectory(fs, tableInfoPath);
+  }
+
+  /**
+   * Called when we are creating a table to write out the tables' descriptor.
+   * 
+   * @param fs
+   * @param hTableDescriptor
+   * @param tableDir
+   * @throws IOException
+   */
+  private static void writeTableDescriptor(FileSystem fs,
+      HTableDescriptor hTableDescriptor, Path tableDir, boolean forceCreation)
+      throws IOException {
+    // Create in tmpdir and then move into place in case we crash after
+    // create but before close. If we don't successfully close the file,
+    // subsequent region reopens will fail the below because create is
+    // registered in NN.
+    Path tableInfoPath = new Path(tableDir, HConstants.TABLEINFO_NAME);
+    Path tmpPath = new Path(new Path(tableDir, ".tmp"),
+        HConstants.TABLEINFO_NAME);
+    LOG.info("TableInfoPath = " + tableInfoPath + " tmpPath = " + tmpPath);
+    try {
+      writeHTD(fs, tmpPath, hTableDescriptor);
+    } catch (IOException e) {
+      LOG.error("Unable to write the tabledescriptor in the path" + tmpPath
+          + ".", e);
+      throw e;
+    }
+    if (forceCreation) {
+      if (!fs.delete(tableInfoPath, false)) {
+        String errMsg = "Unable to delete " + tableInfoPath
+            + " while forcefully writing the table descriptor.";
+        LOG.error(errMsg);
+        throw new IOException(errMsg);
+      }
+    }
+    if (!fs.rename(tmpPath, tableInfoPath)) {
+      String errMsg = "Unable to rename " + tmpPath + " to " + tableInfoPath;
+      LOG.error(errMsg);
+      throw new IOException(errMsg);
+    } else {
+      LOG.info("TableDescriptor stored. TableInfoPath = " + tableInfoPath);
+    }
+  }
+
+  /**
+   * Update table descriptor
+   * @param fs
+   * @param conf
+   * @param hTableDescriptor
+   * @throws IOException
+   */
+  public static void updateHTableDescriptor(FileSystem fs, Path rootdir,
+      HTableDescriptor hTableDescriptor)
+  throws IOException {
+    Path tableInfoPath =
+      getTableInfoPath(rootdir, hTableDescriptor.getNameAsString());
+    writeHTD(fs, tableInfoPath, hTableDescriptor);
+    LOG.info("updateHTableDescriptor. Updated tableinfo in HDFS under " +
+      tableInfoPath + " For HTD => " + hTableDescriptor.toString());
+  }
+
+  private static void writeHTD(final FileSystem fs, final Path p,
+      final HTableDescriptor htd)
+  throws IOException {
+    FSDataOutputStream out = fs.create(p, true);
+    try {
+      htd.write(out);
+      out.write('\n');
+      out.write('\n');
+      out.write(Bytes.toBytes(htd.toString()));
+    } finally {
+      out.close();
+    }
+  }
+  
+  /**
+   * Runs through the HBase rootdir and creates a reverse lookup map for 
+   * table StoreFile names to the full Path. 
+   * <br>
+   * Example...<br>
+   * Key = 3944417774205889744  <br>
+   * Value = hdfs://localhost:51169/user/userid/-ROOT-/70236052/info/3944417774205889744
+   *
+   * @param fs  The file system to use.
+   * @param hbaseRootDir  The root directory to scan.
+   * @return Map keyed by StoreFile name with a value of the full Path.
+   * @throws IOException When scanning the directory fails.
+   */
+  public static Map<String, Path> getTableStoreFilePathMap(
+    final FileSystem fs, final Path hbaseRootDir)
+  throws IOException {
+    Map<String, Path> map = new HashMap<String, Path>();
+    
+    // if this method looks similar to 'getTableFragmentation' that is because 
+    // it was borrowed from it.
+    
+    DirFilter df = new DirFilter(fs);
+    // presumes any directory under hbase.rootdir is a table
+    FileStatus [] tableDirs = fs.listStatus(hbaseRootDir, df);
+    for (FileStatus tableDir : tableDirs) {
+      // Skip the .log directory.  All others should be tables.  Inside a table,
+      // there are compaction.dir directories to skip.  Otherwise, all else
+      // should be regions. 
+      Path d = tableDir.getPath();
+      if (d.getName().equals(HConstants.HREGION_LOGDIR_NAME)) {
+        continue;
+      }
+      FileStatus[] regionDirs = fs.listStatus(d, df);
+      for (FileStatus regionDir : regionDirs) {
+        Path dd = regionDir.getPath();
+        if (dd.getName().equals(HConstants.HREGION_COMPACTIONDIR_NAME)) {
+          continue;
+        }
+        // else its a region name, now look in region for families
+        FileStatus[] familyDirs = fs.listStatus(dd, df);
+        for (FileStatus familyDir : familyDirs) {
+          Path family = familyDir.getPath();
+          // now in family, iterate over the StoreFiles and
+          // put in map
+          FileStatus[] familyStatus = fs.listStatus(family);
+          for (FileStatus sfStatus : familyStatus) {
+            Path sf = sfStatus.getPath();
+            map.put( sf.getName(), sf);
+          }
+          
+        }
+      }
+    }
+      return map;
+  }
+
 }

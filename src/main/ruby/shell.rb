@@ -218,12 +218,18 @@ Shell.load_command_group(
     create
     describe
     disable
+    disable_all
     is_disabled
     drop
+    drop_all
     enable
+    enable_all
     is_enabled
     exists
     list
+    show_filters
+    alter_status
+    alter_async
   ]
 )
 
@@ -259,6 +265,7 @@ Shell.load_command_group(
     split
     unassign
     zk_dump
+    hlog_roll
   ]
 )
 
@@ -269,6 +276,7 @@ Shell.load_command_group(
   :commands => %w[
     add_peer
     remove_peer
+    list_peers
     enable_peer
     disable_peer
     start_replication

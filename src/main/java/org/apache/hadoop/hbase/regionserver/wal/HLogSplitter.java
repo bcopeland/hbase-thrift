@@ -19,10 +19,7 @@
  */
 package org.apache.hadoop.hbase.regionserver.wal;
 
-import static org.apache.hadoop.hbase.util.FSUtils.recoverFileLease;
-
 import java.io.EOFException;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.lang.reflect.Constructor;
@@ -44,24 +41,23 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hbase.io.HeapSize;
-import org.apache.hadoop.hbase.master.SplitLogManager.TaskFinisher.Status;
-import org.apache.hadoop.hbase.monitoring.MonitoredTask;
-import org.apache.hadoop.hbase.monitoring.TaskMonitor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.RemoteExceptionHandler;
+import org.apache.hadoop.hbase.io.HeapSize;
+import org.apache.hadoop.hbase.monitoring.MonitoredTask;
+import org.apache.hadoop.hbase.monitoring.TaskMonitor;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.wal.HLog.Entry;
 import org.apache.hadoop.hbase.regionserver.wal.HLog.Reader;
 import org.apache.hadoop.hbase.regionserver.wal.HLog.Writer;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.CancelableProgressable;
+import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
-import org.apache.hadoop.hbase.util.ClassSize;
-import org.apache.hadoop.io.MultipleIOException;
 import org.apache.hadoop.hbase.zookeeper.ZKSplitLog;
+import org.apache.hadoop.io.MultipleIOException;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
@@ -204,8 +200,10 @@ public class HLogSplitter {
     splits = splitLog(logfiles);
 
     splitTime = EnvironmentEdgeManager.currentTimeMillis() - startTime;
-    logAndReport("hlog file splitting completed in " + splitTime +
-        " ms for " + srcDir.toString());
+    String msg = "hlog file splitting completed in " + splitTime +
+        " ms for " + srcDir.toString();
+    status.markComplete(msg);
+    LOG.info(msg);
     return splits;
   }
   
@@ -355,7 +353,7 @@ public class HLogSplitter {
   }
 
   public boolean splitLogFileToTemp(FileStatus logfile, String tmpname,
-      CancelableProgressable reporter)  throws IOException {
+      CancelableProgressable reporter)  throws IOException {	    
     final Map<byte[], Object> logWriters = Collections.
     synchronizedMap(new TreeMap<byte[], Object>(Bytes.BYTES_COMPARATOR));
     boolean isCorrupted = false;
@@ -411,7 +409,10 @@ public class HLogSplitter {
         if (wap == null) {
           wap = createWAP(region, entry, rootDir, tmpname, fs, conf);
           if (wap == null) {
+        	  // ignore edits from this region. It doesn't ezist anymore.
+        	  // It was probably already split.
             logWriters.put(region, BAD_WRITER);
+            continue;
           } else {
             logWriters.put(region, wap);
           }
@@ -530,7 +531,7 @@ public class HLogSplitter {
   private static List<FileStatus> listAll(FileSystem fs, Path dir)
   throws IOException {
     List<FileStatus> fset = new ArrayList<FileStatus>(100);
-    FileStatus [] files = fs.listStatus(dir);
+    FileStatus [] files = fs.exists(dir)? fs.listStatus(dir): null;
     if (files != null) {
       for (FileStatus f : files) {
         if (f.isDir()) {
@@ -687,7 +688,7 @@ public class HLogSplitter {
     }
 
     try {
-      recoverFileLease(fs, path, conf);
+      FSUtils.getInstance(fs, conf).recoverFileLease(fs, path, conf);
       try {
         in = getReader(fs, path, conf);
       } catch (EOFException e) {
@@ -813,19 +814,20 @@ public class HLogSplitter {
       HLogKey key = entry.getKey();
 
       RegionEntryBuffer buffer;
+      long incrHeap;
       synchronized (this) {
         buffer = buffers.get(key.getEncodedRegionName());
         if (buffer == null) {
           buffer = new RegionEntryBuffer(key.getTablename(), key.getEncodedRegionName());
           buffers.put(key.getEncodedRegionName(), buffer);
         }
-        long incrHeap = buffer.appendEntry(entry);
-        totalBuffered += incrHeap;
+        incrHeap= buffer.appendEntry(entry);        
       }
 
       // If we crossed the chunk threshold, wait for more space to be available
       synchronized (dataAvailable) {
-        while (totalBuffered > maxHeapUsage && thrown == null) {
+        totalBuffered += incrHeap;
+        while (totalBuffered > maxHeapUsage && thrown.get() == null) {
           LOG.debug("Used " + totalBuffered + " bytes of buffered edits, waiting for IO threads...");
           dataAvailable.wait(3000);
         }
@@ -993,7 +995,10 @@ public class HLogSplitter {
     }
 
     void finish() {
-      shouldStop = true;
+      synchronized (dataAvailable) {
+        shouldStop = true;
+        dataAvailable.notifyAll();
+      }
     }
   }
 

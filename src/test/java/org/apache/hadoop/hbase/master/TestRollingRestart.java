@@ -20,6 +20,8 @@
 package org.apache.hadoop.hbase.master;
 
 import static org.junit.Assert.*;
+
+import java.io.IOException;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.Set;
@@ -48,7 +50,7 @@ import org.junit.Test;
 public class TestRollingRestart {
   private static final Log LOG = LogFactory.getLog(TestRollingRestart.class);
 
-  @Test
+  @Test (timeout=300000)
   public void testBasicRollingRestart() throws Exception {
 
     // Start a cluster with 2 masters and 4 regionservers
@@ -208,7 +210,11 @@ public class TestRollingRestart {
     waitForRSShutdownToStartAndFinish(activeMaster,
         metaServer.getRegionServer().getServerName());
     log("Waiting for no more RIT");
-    blockUntilNoRIT(zkw, master);
+    long start = System.currentTimeMillis();
+    do {
+      blockUntilNoRIT(zkw, master);
+    } while (getNumberOfOnlineRegions(cluster) < numRegions 
+        && System.currentTimeMillis()-start < 60000);
     log("Verifying there are " + numRegions + " assigned on cluster");
     assertRegionsAssigned(cluster, regions);
     assertEquals(expectedNumRS, cluster.getRegionServerThreads().size());
@@ -323,16 +329,18 @@ public class TestRollingRestart {
     LOG.debug("\n\nTRR: " + msg + "\n");
   }
 
-  private RegionServerThread getServerHostingMeta(MiniHBaseCluster cluster) {
+  private RegionServerThread getServerHostingMeta(MiniHBaseCluster cluster)
+      throws IOException {
     return getServerHosting(cluster, HRegionInfo.FIRST_META_REGIONINFO);
   }
 
-  private RegionServerThread getServerHostingRoot(MiniHBaseCluster cluster) {
+  private RegionServerThread getServerHostingRoot(MiniHBaseCluster cluster)
+      throws IOException {
     return getServerHosting(cluster, HRegionInfo.ROOT_REGIONINFO);
   }
 
   private RegionServerThread getServerHosting(MiniHBaseCluster cluster,
-      HRegionInfo region) {
+      HRegionInfo region) throws IOException {
     for (RegionServerThread rst : cluster.getRegionServerThreads()) {
       if (rst.getRegionServer().getOnlineRegions().contains(region)) {
         return rst;
@@ -341,12 +349,17 @@ public class TestRollingRestart {
     return null;
   }
 
-  private void assertRegionsAssigned(MiniHBaseCluster cluster,
-      Set<String> expectedRegions) {
+  private int getNumberOfOnlineRegions(MiniHBaseCluster cluster) {
     int numFound = 0;
     for (RegionServerThread rst : cluster.getLiveRegionServerThreads()) {
       numFound += rst.getRegionServer().getNumberOfOnlineRegions();
     }
+    return numFound;
+  }
+  
+  private void assertRegionsAssigned(MiniHBaseCluster cluster,
+      Set<String> expectedRegions) throws IOException {
+    int numFound = getNumberOfOnlineRegions(cluster);
     if (expectedRegions.size() > numFound) {
       log("Expected to find " + expectedRegions.size() + " but only found"
           + " " + numFound);
@@ -371,7 +384,8 @@ public class TestRollingRestart {
     }
   }
 
-  private NavigableSet<String> getAllOnlineRegions(MiniHBaseCluster cluster) {
+  private NavigableSet<String> getAllOnlineRegions(MiniHBaseCluster cluster)
+      throws IOException {
     NavigableSet<String> online = new TreeSet<String>();
     for (RegionServerThread rst : cluster.getLiveRegionServerThreads()) {
       for (HRegionInfo region : rst.getRegionServer().getOnlineRegions()) {
@@ -382,7 +396,7 @@ public class TestRollingRestart {
   }
 
   private NavigableSet<String> getDoubleAssignedRegions(
-      MiniHBaseCluster cluster) {
+      MiniHBaseCluster cluster) throws IOException {
     NavigableSet<String> online = new TreeSet<String>();
     NavigableSet<String> doubled = new TreeSet<String>();
     for (RegionServerThread rst : cluster.getLiveRegionServerThreads()) {

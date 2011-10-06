@@ -109,7 +109,7 @@ public class CloseRegionHandler extends EventHandler {
 
       int expectedVersion = FAILED;
       if (this.zk) {
-        expectedVersion = setClosingState();
+        expectedVersion = getCurrentVersion();
         if (expectedVersion == FAILED) return;
       }
 
@@ -125,14 +125,26 @@ public class CloseRegionHandler extends EventHandler {
             regionInfo.getRegionNameAsString());
           return;
         }
-      } catch (IOException e) {
-        LOG.error("Unrecoverable exception while closing region " +
-          regionInfo.getRegionNameAsString() + ", still finishing close", e);
+      } catch (Throwable t) {
+        // A throwable here indicates that we couldn't successfully flush the
+        // memstore before closing. So, we need to abort the server and allow
+        // the master to split our logs in order to recover the data.
+        server.abort("Unrecoverable exception while closing region " +
+          regionInfo.getRegionNameAsString() + ", still finishing close", t);
+        throw new RuntimeException(t);
       }
 
       this.rsServices.removeFromOnlineRegions(regionInfo.getEncodedName());
 
-      if (this.zk) setClosedState(expectedVersion, region);
+      if (this.zk) {
+        if (setClosedState(expectedVersion, region)) {
+          LOG.debug("set region closed state in zk successfully for region " +
+            name + " sn name: " + this.server.getServerName());
+        } else {
+          LOG.debug("set region closed state in zk unsuccessfully for region " +
+            name + " sn name: " + this.server.getServerName());
+        }
+      }
 
       // Done!  Region is closed on this RS
       LOG.debug("Closed region " + region.getRegionNameAsString());
@@ -145,8 +157,9 @@ public class CloseRegionHandler extends EventHandler {
   /**
    * Transition ZK node to CLOSED
    * @param expectedVersion
+   * @return If the state is set successfully
    */
-  private void setClosedState(final int expectedVersion, final HRegion region) {
+  private boolean setClosedState(final int expectedVersion, final HRegion region) {
     try {
       if (ZKAssign.transitionNodeClosed(server.getZooKeeper(), regionInfo,
           server.getServerName(), expectedVersion) == FAILED) {
@@ -154,35 +167,37 @@ public class CloseRegionHandler extends EventHandler {
             " CLOSING to CLOSED got a version mismatch, someone else clashed " +
             "so now unassigning");
         region.close();
-        return;
+        return false;
       }
     } catch (NullPointerException e) {
       // I've seen NPE when table was deleted while close was running in unit tests.
       LOG.warn("NPE during close -- catching and continuing...", e);
+      return false;
     } catch (KeeperException e) {
       LOG.error("Failed transitioning node from CLOSING to CLOSED", e);
-      return;
+      return false;
     } catch (IOException e) {
       LOG.error("Failed to close region after failing to transition", e);
-      return;
+      return false;
     }
+    return true;
   }
 
   /**
-   * Create ZK node in CLOSING state.
-   * @return The expectedVersion.  If -1, we failed setting CLOSING.
+   * Get the node's current version
+   * @return The expectedVersion.  If -1, we failed getting the node
    */
-  private int setClosingState() {
+  private int getCurrentVersion() {
     int expectedVersion = FAILED;
     try {
-      if ((expectedVersion = ZKAssign.createNodeClosing(
-          server.getZooKeeper(), regionInfo, server.getServerName())) == FAILED) {
-        LOG.warn("Error creating node in CLOSING state, aborting close of " +
-          regionInfo.getRegionNameAsString());
+      if ((expectedVersion = ZKAssign.getVersion(
+          server.getZooKeeper(), regionInfo)) == FAILED) {
+        LOG.warn("Error getting node's version in CLOSING state," +
+          " aborting close of " + regionInfo.getRegionNameAsString());
       }
     } catch (KeeperException e) {
       LOG.warn("Error creating node in CLOSING state, aborting close of " +
-        regionInfo.getRegionNameAsString());
+        regionInfo.getRegionNameAsString(), e);
     }
     return expectedVersion;
   }

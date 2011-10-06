@@ -19,20 +19,24 @@
  */
 package org.apache.hadoop.hbase.catalog;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import java.io.IOException;
 import java.net.ConnectException;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.HConstants;
-import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.NotAllMetaRegionsOnlineException;
-import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.ipc.HRegionInterface;
+import org.apache.hadoop.hbase.migration.HRegionInfo090x;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Writables;
+import org.apache.hadoop.hbase.master.MasterServices;
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.catalog.MetaReader.Visitor;
 
 /**
  * Writes region and assignment information to <code>.META.</code>.
@@ -43,6 +47,13 @@ import org.apache.hadoop.hbase.util.Writables;
 public class MetaEditor {
   private static final Log LOG = LogFactory.getLog(MetaEditor.class);
 
+  private static Put makePutFromRegionInfo(HRegionInfo regionInfo) throws IOException {
+    Put put = new Put(regionInfo.getRegionName());
+    put.add(HConstants.CATALOG_FAMILY, HConstants.REGIONINFO_QUALIFIER,
+        Writables.getBytes(regionInfo));
+    return put;
+  }
+  
   /**
    * Adds a META row for the specified new region.
    * @param regionInfo region information
@@ -51,12 +62,28 @@ public class MetaEditor {
   public static void addRegionToMeta(CatalogTracker catalogTracker,
       HRegionInfo regionInfo)
   throws IOException {
-    Put put = new Put(regionInfo.getRegionName());
-    put.add(HConstants.CATALOG_FAMILY, HConstants.REGIONINFO_QUALIFIER,
-        Writables.getBytes(regionInfo));
     catalogTracker.waitForMetaServerConnectionDefault().put(
-        CatalogTracker.META_REGION, put);
+        CatalogTracker.META_REGION, makePutFromRegionInfo(regionInfo));
     LOG.info("Added region " + regionInfo.getRegionNameAsString() + " to META");
+  }
+
+  /**
+   * Adds a META row for each of the specified new regions.
+   * @param catalogTracker CatalogTracker
+   * @param regionInfos region information list
+   * @throws IOException if problem connecting or updating meta
+   */
+  public static void addRegionsToMeta(CatalogTracker catalogTracker,
+      List<HRegionInfo> regionInfos)
+  throws IOException {
+    List<Put> puts = new ArrayList<Put>();
+    for (HRegionInfo regionInfo : regionInfos) { 
+      puts.add(makePutFromRegionInfo(regionInfo));
+      LOG.debug("Added region " + regionInfo.getRegionNameAsString() + " to META");
+    }
+    catalogTracker.waitForMetaServerConnectionDefault().put(
+        CatalogTracker.META_REGION, puts);
+    LOG.info("Added " + puts.size() + " regions to META");
   }
 
   /**
@@ -204,20 +231,157 @@ public class MetaEditor {
   }
 
   /**
-   * Updates the region information for the specified region in META.
+   * Update the metamigrated flag in -ROOT-.
    * @param catalogTracker
-   * @param regionInfo region to be updated in META
    * @throws IOException
    */
-  public static void updateRegionInfo(CatalogTracker catalogTracker,
-      HRegionInfo regionInfo)
-  throws IOException {
-    Put put = new Put(regionInfo.getRegionName());
-    addRegionInfo(put, regionInfo);
-    catalogTracker.waitForMetaServerConnectionDefault().put(
-        CatalogTracker.META_REGION, put);
-    LOG.info("Updated region " + regionInfo.getRegionNameAsString() + " in META");
+  public static void updateRootWithMetaMigrationStatus(
+      CatalogTracker catalogTracker) throws IOException {
+    updateRootWithMetaMigrationStatus(catalogTracker, true);
   }
+
+  /**
+   * Update the metamigrated flag in -ROOT-.
+   * @param catalogTracker
+   * @param metaUpdated
+   * @throws IOException
+   */
+  public static void updateRootWithMetaMigrationStatus(
+      CatalogTracker catalogTracker, boolean metaUpdated)
+      throws IOException {
+    Put put = new Put(HRegionInfo.ROOT_REGIONINFO.getRegionName());
+    addMetaUpdateStatus(put, metaUpdated);
+    catalogTracker.waitForRootServerConnectionDefault().put(
+        CatalogTracker.ROOT_REGION, put);
+    LOG.info("Updated -ROOT- row with metaMigrated status = " + metaUpdated);
+  }
+
+  /**
+   * Update legacy META rows, removing HTD from HRI.
+   * @param masterServices
+   * @return
+   * @throws IOException
+   */
+  public static List<HTableDescriptor> updateMetaWithNewRegionInfo(
+      final MasterServices masterServices)
+  throws IOException {
+    final List<HTableDescriptor> htds = new ArrayList<HTableDescriptor>();
+    Visitor v = new Visitor() {
+      @Override
+      public boolean visit(Result r) throws IOException {
+        if (r ==  null || r.isEmpty()) return true;
+        HRegionInfo090x hrfm = getHRegionInfoForMigration(r);
+        if (hrfm == null) return true;
+        htds.add(hrfm.getTableDesc());
+        masterServices.getMasterFileSystem()
+          .createTableDescriptor(hrfm.getTableDesc());
+        updateHRI(masterServices.getCatalogTracker()
+            .waitForMetaServerConnectionDefault(),
+            hrfm, CatalogTracker.META_REGION);
+        return true;
+      }
+    };
+    MetaReader.fullScan(masterServices.getCatalogTracker(), v);
+    updateRootWithMetaMigrationStatus(masterServices.getCatalogTracker());
+    return htds;
+  }
+
+  /**
+   * Migrate root and meta to newer version. This updates the META and ROOT
+   * and removes the HTD from HRI.
+   * @param masterServices
+   * @throws IOException
+   */
+  public static void migrateRootAndMeta(final MasterServices masterServices)
+      throws IOException {
+    updateRootWithNewRegionInfo(masterServices);
+    updateMetaWithNewRegionInfo(masterServices);
+  }
+
+  /**
+   * Update the ROOT with new HRI. (HRI with no HTD)
+   * @param masterServices
+   * @return
+   * @throws IOException
+   */
+  public static List<HTableDescriptor> updateRootWithNewRegionInfo(
+      final MasterServices masterServices)
+  throws IOException {
+    final List<HTableDescriptor> htds = new ArrayList<HTableDescriptor>();
+    Visitor v = new Visitor() {
+      @Override
+      public boolean visit(Result r) throws IOException {
+        if (r ==  null || r.isEmpty()) return true;
+        HRegionInfo090x hrfm = getHRegionInfoForMigration(r);
+        if (hrfm == null) return true;
+        htds.add(hrfm.getTableDesc());
+        masterServices.getMasterFileSystem().createTableDescriptor(
+            hrfm.getTableDesc());
+        updateHRI(masterServices.getCatalogTracker()
+            .waitForRootServerConnectionDefault(),
+            hrfm, CatalogTracker.ROOT_REGION);
+        return true;
+      }
+    };
+    MetaReader.fullScan(
+        masterServices.getCatalogTracker().waitForRootServerConnectionDefault(),
+        v, HRegionInfo.ROOT_REGIONINFO.getRegionName(), null);
+    return htds;
+  }
+
+  private static void updateHRI(HRegionInterface hRegionInterface,
+                                HRegionInfo090x hRegionInfo090x, byte[] regionName)
+    throws IOException {
+    HRegionInfo regionInfo = new HRegionInfo(hRegionInfo090x);
+    Put put = new Put(regionInfo.getRegionName());
+    put.add(HConstants.CATALOG_FAMILY, HConstants.REGIONINFO_QUALIFIER,
+        Writables.getBytes(regionInfo));
+    hRegionInterface.put(regionName, put);
+    LOG.info("Updated region " + regionInfo + " to " + Bytes.toString(regionName));
+  }
+
+  public static HRegionInfo090x getHRegionInfoForMigration(
+      Result data) throws IOException {
+    HRegionInfo090x info = null;
+    byte [] bytes =
+      data.getValue(HConstants.CATALOG_FAMILY, HConstants.REGIONINFO_QUALIFIER);
+    if (bytes == null) return null;
+    try {
+      info = Writables.getHRegionInfoForMigration(bytes);
+    } catch(IOException ioe) {
+      if (ioe.getMessage().equalsIgnoreCase("HTD not found in input buffer")) {
+         return null;
+      } else {
+        throw ioe;
+      }
+    }
+    LOG.info("Current INFO from scan results = " + info);
+    return info;
+  }
+
+  public static HRegionInfo getHRegionInfo(
+      Result data) throws IOException {
+    byte [] bytes =
+      data.getValue(HConstants.CATALOG_FAMILY, HConstants.REGIONINFO_QUALIFIER);
+    if (bytes == null) return null;
+    HRegionInfo info = Writables.getHRegionInfo(bytes);
+    LOG.info("Current INFO from scan results = " + info);
+    return info;
+  }
+
+  private static Put addMetaUpdateStatus(final Put p) {
+    p.add(HConstants.CATALOG_FAMILY, HConstants.META_MIGRATION_QUALIFIER,
+      Bytes.toBytes("true"));
+    return p;
+  }
+
+
+  private static Put addMetaUpdateStatus(final Put p, final boolean metaUpdated) {
+    p.add(HConstants.CATALOG_FAMILY, HConstants.META_MIGRATION_QUALIFIER,
+      Bytes.toBytes(metaUpdated));
+    return p;
+  }
+
 
   private static Put addRegionInfo(final Put p, final HRegionInfo hri)
   throws IOException {

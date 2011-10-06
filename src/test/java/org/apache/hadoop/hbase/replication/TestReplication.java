@@ -59,6 +59,7 @@ public class TestReplication {
 
   private static Configuration conf1;
   private static Configuration conf2;
+  private static Configuration CONF_WITH_LOCALFS;
 
   private static ZooKeeperWatcher zkw1;
   private static ZooKeeperWatcher zkw2;
@@ -103,11 +104,15 @@ public class TestReplication {
     utility1 = new HBaseTestingUtility(conf1);
     utility1.startMiniZKCluster();
     MiniZooKeeperCluster miniZK = utility1.getZkCluster();
-    zkw1 = new ZooKeeperWatcher(conf1, "cluster1", null);
+    // Have to reget conf1 in case zk cluster location different
+    // than default
+    conf1 = utility1.getConfiguration();
+    zkw1 = new ZooKeeperWatcher(conf1, "cluster1", null, true);
     admin = new ReplicationAdmin(conf1);
     LOG.info("Setup first Zk");
 
-    conf2 = HBaseConfiguration.create();
+    // Base conf2 on conf1 so it gets the right zk cluster.
+    conf2 = HBaseConfiguration.create(conf1);
     conf2.set(HConstants.ZOOKEEPER_ZNODE_PARENT, "/2");
     conf2.setInt("hbase.client.retries.number", 6);
     conf2.setBoolean(HConstants.REPLICATION_ENABLE_KEY, true);
@@ -115,7 +120,7 @@ public class TestReplication {
 
     utility2 = new HBaseTestingUtility(conf2);
     utility2.setZkCluster(miniZK);
-    zkw2 = new ZooKeeperWatcher(conf2, "cluster2", null);
+    zkw2 = new ZooKeeperWatcher(conf2, "cluster2", null, true);
 
     slaveClusterKey = conf2.get(HConstants.ZOOKEEPER_QUORUM)+":" +
             conf2.get("hbase.zookeeper.property.clientPort")+":/2";
@@ -123,7 +128,7 @@ public class TestReplication {
     setIsReplication(true);
 
     LOG.info("Setup second Zk");
-
+    CONF_WITH_LOCALFS = HBaseConfiguration.create(conf1);
     utility1.startMiniCluster(2);
     utility2.startMiniCluster(2);
 
@@ -137,7 +142,6 @@ public class TestReplication {
     HBaseAdmin admin2 = new HBaseAdmin(conf2);
     admin1.createTable(table);
     admin2.createTable(table);
-
     htable1 = new HTable(conf1, tableName);
     htable1.setWriteBufferSize(1024);
     htable2 = new HTable(conf2, tableName);
@@ -202,7 +206,7 @@ public class TestReplication {
    * Add a row, check it's replicated, delete it, check's gone
    * @throws Exception
    */
-  @Test
+  @Test(timeout=300000)
   public void testSimplePutDelete() throws Exception {
     LOG.info("testSimplePutDelete");
     Put put = new Put(row);
@@ -248,7 +252,7 @@ public class TestReplication {
    * Try a small batch upload using the write buffer, check it's replicated
    * @throws Exception
    */
-  @Test
+  @Test(timeout=300000)
   public void testSmallBatch() throws Exception {
     LOG.info("testSmallBatch");
     Put put;
@@ -292,7 +296,7 @@ public class TestReplication {
    * replicated, enable it, try replicating and it should work
    * @throws Exception
    */
-  @Test
+  @Test(timeout=300000)
   public void testStartStop() throws Exception {
 
     // Test stopping replication
@@ -361,7 +365,7 @@ public class TestReplication {
    * cluster
    * @throws Exception
    */
-  @Test
+  @Test(timeout=300000)
   public void testAddAndRemoveClusters() throws Exception {
     LOG.info("testAddAndRemoveClusters");
     admin.removePeer("2");
@@ -414,7 +418,7 @@ public class TestReplication {
    * hlog rolling and other non-trivial code paths
    * @throws Exception
    */
-  @Test
+  @Test(timeout=300000)
   public void loadTesting() throws Exception {
     htable1.setWriteBufferSize(1024);
     htable1.setAutoFlush(false);
@@ -469,14 +473,14 @@ public class TestReplication {
    * comparison where all the cells are different.
    * @throws Exception
    */
-  @Test
+  @Test(timeout=300000)
   public void testVerifyRepJob() throws Exception {
     // Populate the tables, at the same time it guarantees that the tables are
     // identical since it does the check
     testSmallBatch();
 
     String[] args = new String[] {"2", Bytes.toString(tableName)};
-    Job job = VerifyReplication.createSubmittableJob(conf1, args);
+    Job job = VerifyReplication.createSubmittableJob(CONF_WITH_LOCALFS, args);
     if (job == null) {
       fail("Job wasn't created, see the log");
     }
@@ -500,7 +504,7 @@ public class TestReplication {
     }
     Delete delete = new Delete(put.getRow());
     htable2.delete(delete);
-    job = VerifyReplication.createSubmittableJob(conf1, args);
+    job = VerifyReplication.createSubmittableJob(CONF_WITH_LOCALFS, args);
     if (job == null) {
       fail("Job wasn't created, see the log");
     }
@@ -521,7 +525,7 @@ public class TestReplication {
    *
    * @throws Exception
    */
-  @Test
+  @Test(timeout=300000)
   public void queueFailover() throws Exception {
     utility1.createMultiRegions(htable1, famName);
 

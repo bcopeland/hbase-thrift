@@ -76,8 +76,8 @@ public class ScanDeleteTracker implements DeleteTracker {
 
       if (deleteBuffer != null && type < deleteType) {
         // same column, so ignore less specific delete
-        if (Bytes.compareTo(deleteBuffer, deleteOffset, deleteLength,
-            buffer, qualifierOffset, qualifierLength) == 0){
+        if (Bytes.equals(deleteBuffer, deleteOffset, deleteLength,
+            buffer, qualifierOffset, qualifierLength)){
           return;
         }
       }
@@ -130,7 +130,11 @@ public class ScanDeleteTracker implements DeleteTracker {
         // Next column case.
         deleteBuffer = null;
       } else {
-        //Should never happen, throw Exception
+        throw new IllegalStateException("isDelete failed: deleteBuffer="
+            + Bytes.toStringBinary(deleteBuffer, deleteOffset, deleteLength)
+            + ", qualifier="
+            + Bytes.toStringBinary(buffer, qualifierOffset, qualifierLength)
+            + ", timestamp=" + timestamp + ", comparison result: " + ret);
       }
     }
 

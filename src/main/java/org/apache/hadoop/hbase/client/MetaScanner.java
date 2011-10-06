@@ -189,7 +189,7 @@ public class MetaScanner {
           " starting at row=" + Bytes.toStringBinary(startRow) + " for max=" +
           rowUpperLimit + " rows");
       }
-      callable = new ScannerCallable(connection, metaTableName, scan);
+      callable = new ScannerCallable(connection, metaTableName, scan, null);
       // Open scanner
       connection.getRegionServerWithRetries(callable);
 
@@ -288,7 +288,7 @@ public class MetaScanner {
         HRegionInfo info = Writables.getHRegionInfo(
             rowResult.getValue(HConstants.CATALOG_FAMILY,
                 HConstants.REGIONINFO_QUALIFIER));
-        if (!(Bytes.equals(info.getTableDesc().getName(), tablename))) {
+        if (!(Bytes.equals(info.getTableName(), tablename))) {
           return false;
         }
         byte [] value = rowResult.getValue(HConstants.CATALOG_FAMILY,

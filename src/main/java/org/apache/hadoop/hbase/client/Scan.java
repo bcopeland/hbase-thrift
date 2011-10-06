@@ -29,13 +29,13 @@ import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.io.WritableFactories;
-import org.apache.hadoop.io.WritableUtils;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.TreeMap;
@@ -81,13 +81,19 @@ import java.util.TreeSet;
  * Expert: To explicitly disable server-side block caching for this scan,
  * execute {@link #setCacheBlocks(boolean)}.
  */
-public class Scan implements Writable {
+public class Scan extends OperationWithAttributes implements Writable {
   private static final byte SCAN_VERSION = (byte)2;
   private byte [] startRow = HConstants.EMPTY_START_ROW;
   private byte [] stopRow  = HConstants.EMPTY_END_ROW;
   private int maxVersions = 1;
   private int batch = -1;
-  private Map<String, byte[]> attributes;
+
+  // If application wants to collect scan metrics, it needs to
+  // call scan.setAttribute(SCAN_ATTRIBUTES_ENABLE, Bytes.toBytes(Boolean.TRUE))
+  static public String SCAN_ATTRIBUTES_METRICS_ENABLE =
+    "scan.attributes.metrics.enable";
+  static public String SCAN_ATTRIBUTES_METRICS_DATA =
+    "scan.attributes.metrics.data";
 
   /*
    * -1 means no caching
@@ -445,109 +451,79 @@ public class Scan implements Writable {
   }
 
   /**
-   * Sets arbitrary scan's attribute.
-   * In case value = null attribute is removed from the attributes map.
-   * @param name attribute name
-   * @param value attribute value
-   */
-  public void setAttribute(String name, byte[] value) {
-    if (attributes == null && value == null) {
-      return;
-    }
-
-    if (attributes == null) {
-      attributes = new HashMap<String, byte[]>();
-    }
-
-    if (value == null) {
-      attributes.remove(name);
-      if (attributes.isEmpty()) {
-        this.attributes = null;
-      }
-    } else {
-      attributes.put(name, value);
-    }
-  }
-
-  /**
-   * Gets scan's attribute
-   * @param name attribute name
-   * @return attribute value if attribute is set, <tt>null</tt> otherwise
-   */
-  public byte[] getAttribute(String name) {
-    if (attributes == null) {
-      return null;
-    }
-
-    return attributes.get(name);
-  }
-
-  /**
-   * Gets all scan's attributes
-   * @return unmodifiable map of all attributes
-   */
-  public Map<String, byte[]> getAttributesMap() {
-    if (attributes == null) {
-      return Collections.emptyMap();
-    }
-    return Collections.unmodifiableMap(attributes);
-  }
-
-  /**
-   * @return String
+   * Compile the table and column family (i.e. schema) information
+   * into a String. Useful for parsing and aggregation by debugging,
+   * logging, and administration tools.
+   * @return Map
    */
   @Override
-  public String toString() {
-    StringBuilder sb = new StringBuilder();
-    sb.append("startRow=");
-    sb.append(Bytes.toStringBinary(this.startRow));
-    sb.append(", stopRow=");
-    sb.append(Bytes.toStringBinary(this.stopRow));
-    sb.append(", maxVersions=");
-    sb.append(this.maxVersions);
-    sb.append(", batch=");
-    sb.append(this.batch);
-    sb.append(", caching=");
-    sb.append(this.caching);
-    sb.append(", cacheBlocks=");
-    sb.append(this.cacheBlocks);
-    sb.append(", timeRange=");
-    sb.append("[").append(this.tr.getMin()).append(",");
-    sb.append(this.tr.getMax()).append(")");
-    sb.append(", families=");
+  public Map<String, Object> getFingerprint() {
+    Map<String, Object> map = new HashMap<String, Object>();
+    List<String> families = new ArrayList<String>();
     if(this.familyMap.size() == 0) {
-      sb.append("ALL");
-      return sb.toString();
+      map.put("families", "ALL");
+      return map;
+    } else {
+      map.put("families", families);
     }
-    boolean moreThanOne = false;
-    for(Map.Entry<byte [], NavigableSet<byte[]>> entry : this.familyMap.entrySet()) {
-      if(moreThanOne) {
-        sb.append("), ");
-      } else {
-        moreThanOne = true;
-        sb.append("{");
-      }
-      sb.append("(family=");
-      sb.append(Bytes.toStringBinary(entry.getKey()));
-      sb.append(", columns=");
+    for (Map.Entry<byte [], NavigableSet<byte[]>> entry :
+        this.familyMap.entrySet()) {
+      families.add(Bytes.toStringBinary(entry.getKey()));
+    }
+    return map;
+  }
+
+  /**
+   * Compile the details beyond the scope of getFingerprint (row, columns,
+   * timestamps, etc.) into a Map along with the fingerprinted information.
+   * Useful for debugging, logging, and administration tools.
+   * @param maxCols a limit on the number of columns output prior to truncation
+   * @return Map
+   */ 
+  @Override
+  public Map<String, Object> toMap(int maxCols) {
+    // start with the fingerpring map and build on top of it
+    Map<String, Object> map = getFingerprint();
+    // map from families to column list replaces fingerprint's list of families
+    Map<String, List<String>> familyColumns =
+      new HashMap<String, List<String>>();
+    map.put("families", familyColumns);
+    // add scalar information first
+    map.put("startRow", Bytes.toStringBinary(this.startRow));
+    map.put("stopRow", Bytes.toStringBinary(this.stopRow));
+    map.put("maxVersions", this.maxVersions);
+    map.put("batch", this.batch);
+    map.put("caching", this.caching);
+    map.put("cacheBlocks", this.cacheBlocks);
+    List<Long> timeRange = new ArrayList<Long>();
+    timeRange.add(this.tr.getMin());
+    timeRange.add(this.tr.getMax());
+    map.put("timeRange", timeRange);
+    int colCount = 0;
+    // iterate through affected families and list out up to maxCols columns
+    for (Map.Entry<byte [], NavigableSet<byte[]>> entry :
+      this.familyMap.entrySet()) {
+      List<String> columns = new ArrayList<String>();
+      familyColumns.put(Bytes.toStringBinary(entry.getKey()), columns);
       if(entry.getValue() == null) {
-        sb.append("ALL");
+        colCount++;
+        --maxCols;
+        columns.add("ALL");
       } else {
-        sb.append("{");
-        boolean moreThanOneB = false;
-        for(byte [] column : entry.getValue()) {
-          if(moreThanOneB) {
-            sb.append(", ");
-          } else {
-            moreThanOneB = true;
+        colCount += entry.getValue().size();
+        if (maxCols <= 0) {
+          continue;
+        } 
+        for (byte [] column : entry.getValue()) {
+          if (--maxCols <= 0) {
+            continue;
           }
-          sb.append(Bytes.toStringBinary(column));
+          columns.add(Bytes.toStringBinary(column));
         }
-        sb.append("}");
-      }
-    }
-    sb.append("}");
-    return sb.toString();
+      } 
+    }       
+    map.put("totalColumns", colCount);
+    return map;
   }
 
   @SuppressWarnings("unchecked")
@@ -595,15 +571,7 @@ public class Scan implements Writable {
     }
 
     if (version > 1) {
-      int numAttributes = in.readInt();
-      if (numAttributes > 0) {
-        this.attributes = new HashMap<String, byte[]>();
-        for(int i=0; i<numAttributes; i++) {
-          String name = WritableUtils.readString(in);
-          byte[] value = Bytes.readByteArray(in);
-          this.attributes.put(name, value);
-        }
-      }
+      readAttributes(in);
     }
   }
 
@@ -637,16 +605,7 @@ public class Scan implements Writable {
         out.writeInt(0);
       }
     }
-
-    if (this.attributes == null) {
-      out.writeInt(0);
-    } else {
-      out.writeInt(this.attributes.size());
-      for (Map.Entry<String, byte[]> attr : this.attributes.entrySet()) {
-        WritableUtils.writeString(out, attr.getKey());
-        Bytes.writeByteArray(out, attr.getValue());
-      }
-    }
+    writeAttributes(out);
   }
 
    /**

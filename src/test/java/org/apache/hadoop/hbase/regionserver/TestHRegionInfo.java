@@ -19,13 +19,22 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.IOException;
+
+import org.apache.hadoop.hbase.HBaseTestingUtility;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.MD5Hash;
-
 import org.junit.Test;
-import static org.junit.Assert.*;
 
 public class TestHRegionInfo {
   @Test
@@ -53,10 +62,35 @@ public class TestHRegionInfo {
   }
   
   @Test
+  public void testGetSetOfHTD() throws IOException {
+    HBaseTestingUtility HTU = new HBaseTestingUtility();
+    final String tablename = "testGetSetOfHTD";
+
+    // Delete the temporary table directory that might still be there from the
+    // previous test run.
+    FSUtils.deleteTableDescriptorIfExists(tablename,
+        HTU.getConfiguration());
+
+    HTableDescriptor htd = new HTableDescriptor(tablename);
+    FSUtils.createTableDescriptor(htd, HTU.getConfiguration());
+    HRegionInfo hri = new HRegionInfo(Bytes.toBytes("testGetSetOfHTD"),
+        HConstants.EMPTY_START_ROW, HConstants.EMPTY_END_ROW);
+    HTableDescriptor htd2 = hri.getTableDesc();
+    assertTrue(htd.equals(htd2));
+    final String key = "SOME_KEY";
+    assertNull(htd.getValue(key));
+    final String value = "VALUE";
+    htd.setValue(key, value);
+    hri.setTableDesc(htd);
+    HTableDescriptor htd3 = hri.getTableDesc();
+    assertTrue(htd.equals(htd3));
+  }
+  
+  @Test
   public void testContainsRange() {
     HTableDescriptor tableDesc = new HTableDescriptor("testtable");
     HRegionInfo hri = new HRegionInfo(
-        tableDesc, Bytes.toBytes("a"), Bytes.toBytes("g"));
+        tableDesc.getName(), Bytes.toBytes("a"), Bytes.toBytes("g"));
     // Single row range at start of region
     assertTrue(hri.containsRange(Bytes.toBytes("a"), Bytes.toBytes("a")));
     // Fully contained range

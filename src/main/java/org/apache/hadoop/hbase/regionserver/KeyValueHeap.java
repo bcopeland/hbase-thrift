@@ -40,9 +40,22 @@ import java.util.PriorityQueue;
  * also implements InternalScanner.  WARNING: As is, if you try to use this
  * as an InternalScanner at the Store level, you will get runtime exceptions.
  */
-public class KeyValueHeap implements KeyValueScanner, InternalScanner {
+public class KeyValueHeap extends NonLazyKeyValueScanner
+    implements KeyValueScanner, InternalScanner {
   private PriorityQueue<KeyValueScanner> heap = null;
+
+  /**
+   * The current sub-scanner, i.e. the one that contains the next key/value
+   * to return to the client. This scanner is NOT included in {@link #heap}
+   * (but we frequently add it back to the heap and pull the new winner out).
+   * We maintain an invariant that the current sub-scanner has already done
+   * a real seek, and that current.peek() is always a real key/value (or null)
+   * except for the fake last-key-on-row-column supplied by the multi-column
+   * Bloom filter optimization, which is OK to propagate to StoreScanner. In
+   * order to ensure that, always use {@link #pollRealKV()} to update current.
+   */
   private KeyValueScanner current = null;
+
   private KVScannerComparator comparator;
 
   /**
@@ -52,7 +65,7 @@ public class KeyValueHeap implements KeyValueScanner, InternalScanner {
    * @param comparator
    */
   public KeyValueHeap(List<? extends KeyValueScanner> scanners,
-      KVComparator comparator) {
+      KVComparator comparator) throws IOException {
     this.comparator = new KVScannerComparator(comparator);
     if (!scanners.isEmpty()) {
       this.heap = new PriorityQueue<KeyValueScanner>(scanners.size(),
@@ -64,7 +77,7 @@ public class KeyValueHeap implements KeyValueScanner, InternalScanner {
           scanner.close();
         }
       }
-      this.current = heap.poll();
+      this.current = pollRealKV();
     }
   }
 
@@ -83,13 +96,13 @@ public class KeyValueHeap implements KeyValueScanner, InternalScanner {
     KeyValue kvNext = this.current.peek();
     if (kvNext == null) {
       this.current.close();
-      this.current = this.heap.poll();
+      this.current = pollRealKV();
     } else {
       KeyValueScanner topScanner = this.heap.peek();
       if (topScanner == null ||
           this.comparator.compare(kvNext, topScanner.peek()) >= 0) {
         this.heap.add(this.current);
-        this.current = this.heap.poll();
+        this.current = pollRealKV();
       }
     }
     return kvReturn;
@@ -125,7 +138,7 @@ public class KeyValueHeap implements KeyValueScanner, InternalScanner {
     } else {
       this.heap.add(this.current);
     }
-    this.current = this.heap.poll();
+    this.current = pollRealKV();
     return (this.current != null);
   }
 
@@ -206,60 +219,152 @@ public class KeyValueHeap implements KeyValueScanner, InternalScanner {
    * <p>
    * As individual scanners may run past their ends, those scanners are
    * automatically closed and removed from the heap.
+   * <p>
+   * This function (and {@link #reseek(KeyValue)}) does not do multi-column
+   * Bloom filter and lazy-seek optimizations. To enable those, call
+   * {@link #requestSeek(KeyValue, boolean, boolean)}.
    * @param seekKey KeyValue to seek at or after
    * @return true if KeyValues exist at or after specified key, false if not
    * @throws IOException
    */
+  @Override
   public boolean seek(KeyValue seekKey) throws IOException {
-    if (this.current == null) {
+    return generalizedSeek(false,    // This is not a lazy seek
+                           seekKey,
+                           false,    // forward (false: this is not a reseek)
+                           false);   // Not using Bloom filters
+  }
+
+  /**
+   * This function is identical to the {@link #seek(KeyValue)} function except
+   * that scanner.seek(seekKey) is changed to scanner.reseek(seekKey).
+   */
+  @Override
+  public boolean reseek(KeyValue seekKey) throws IOException {
+    return generalizedSeek(false,    // This is not a lazy seek
+                           seekKey,
+                           true,     // forward (true because this is reseek)
+                           false);   // Not using Bloom filters
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public boolean requestSeek(KeyValue key, boolean forward,
+      boolean useBloom) throws IOException {
+    return generalizedSeek(true, key, forward, useBloom);
+  }
+
+  /**
+   * @param isLazy whether we are trying to seek to exactly the given row/col.
+   *          Enables Bloom filter and most-recent-file-first optimizations for
+   *          multi-column get/scan queries.
+   * @param seekKey key to seek to
+   * @param forward whether to seek forward (also known as reseek)
+   * @param useBloom whether to optimize seeks using Bloom filters
+   */
+  private boolean generalizedSeek(boolean isLazy, KeyValue seekKey,
+      boolean forward, boolean useBloom) throws IOException {
+    if (!isLazy && useBloom) {
+      throw new IllegalArgumentException("Multi-column Bloom filter " +
+          "optimization requires a lazy seek");
+    }
+
+    if (current == null) {
       return false;
     }
-    this.heap.add(this.current);
-    this.current = null;
+    heap.add(current);
+    current = null;
 
     KeyValueScanner scanner;
-    while((scanner = this.heap.poll()) != null) {
+    while ((scanner = heap.poll()) != null) {
       KeyValue topKey = scanner.peek();
-      if(comparator.getComparator().compare(seekKey, topKey) <= 0) { // Correct?
-        // Top KeyValue is at-or-after Seek KeyValue
-        this.current = scanner;
-        return true;
+      if (comparator.getComparator().compare(seekKey, topKey) <= 0) {
+        // Top KeyValue is at-or-after Seek KeyValue. We only know that all
+        // scanners are at or after seekKey (because fake keys of
+        // scanners where a lazy-seek operation has been done are not greater
+        // than their real next keys) but we still need to enforce our
+        // invariant that the top scanner has done a real seek. This way
+        // StoreScanner and RegionScanner do not have to worry about fake keys.
+        heap.add(scanner);
+        current = pollRealKV();
+        return current != null;
       }
-      if(!scanner.seek(seekKey)) {
+
+      boolean seekResult;
+      if (isLazy) {
+        seekResult = scanner.requestSeek(seekKey, forward, useBloom);
+      } else {
+        seekResult = NonLazyKeyValueScanner.doRealSeek(
+            scanner, seekKey, forward);
+      }
+
+      if (!seekResult) {
         scanner.close();
       } else {
-        this.heap.add(scanner);
+        heap.add(scanner);
       }
     }
+
     // Heap is returning empty, scanner is done
     return false;
   }
 
-  public boolean reseek(KeyValue seekKey) throws IOException {
-    //This function is very identical to the seek(KeyValue) function except that
-    //scanner.seek(seekKey) is changed to scanner.reseek(seekKey)
-    if (this.current == null) {
-      return false;
+  /**
+   * Fetches the top sub-scanner from the priority queue, ensuring that a real
+   * seek has been done on it. Works by fetching the top sub-scanner, and if it
+   * has not done a real seek, making it do so (which will modify its top KV),
+   * putting it back, and repeating this until success. Relies on the fact that
+   * on a lazy seek we set the current key of a StoreFileScanner to a KV that
+   * is not greater than the real next KV to be read from that file, so the
+   * scanner that bubbles up to the top of the heap will have global next KV in
+   * this scanner heap if (1) it has done a real seek and (2) its KV is the top
+   * among all top KVs (some of which are fake) in the scanner heap.
+   */
+  private KeyValueScanner pollRealKV() throws IOException {
+    KeyValueScanner kvScanner = heap.poll();
+    if (kvScanner == null) {
+      return null;
     }
-    this.heap.add(this.current);
-    this.current = null;
 
-    KeyValueScanner scanner;
-    while ((scanner = this.heap.poll()) != null) {
-      KeyValue topKey = scanner.peek();
-      if (comparator.getComparator().compare(seekKey, topKey) <= 0) {
-        // Top KeyValue is at-or-after Seek KeyValue
-        this.current = scanner;
-        return true;
-      }
-      if (!scanner.reseek(seekKey)) {
-        scanner.close();
+    while (kvScanner != null && !kvScanner.realSeekDone()) {
+      if (kvScanner.peek() != null) {
+        kvScanner.enforceSeek();
+        KeyValue curKV = kvScanner.peek();
+        if (curKV != null) {
+          KeyValueScanner nextEarliestScanner = heap.peek();
+          if (nextEarliestScanner == null) {
+            // The heap is empty. Return the only possible scanner.
+            return kvScanner;
+          }
+
+          // Compare the current scanner to the next scanner. We try to avoid
+          // putting the current one back into the heap if possible.
+          KeyValue nextKV = nextEarliestScanner.peek();
+          if (nextKV == null || comparator.compare(curKV, nextKV) <= 0) {
+            // We already have the scanner with the earliest KV, so return it.
+            return kvScanner;
+          }
+
+          // Otherwise, put the scanner back into the heap and let it compete
+          // against all other scanners (both those that have done a "real
+          // seek" and a "lazy seek").
+          heap.add(kvScanner);
+        } else {
+          // Close the scanner because we did a real seek and found out there
+          // are no more KVs.
+          kvScanner.close();
+        }
       } else {
-        this.heap.add(scanner);
+        // Close the scanner because it has already run out of KVs even before
+        // we had to do a real seek on it.
+        kvScanner.close();
       }
+      kvScanner = heap.poll();
     }
-    // Heap is returning empty, scanner is done
-    return false;
+
+    return kvScanner;
   }
 
   /**
@@ -272,5 +377,9 @@ public class KeyValueHeap implements KeyValueScanner, InternalScanner {
   @Override
   public long getSequenceID() {
     return 0;
+  }
+
+  KeyValueScanner getCurrentForTesting() {
+    return current;
   }
 }

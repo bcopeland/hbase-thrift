@@ -25,6 +25,9 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.Coprocessor;
+import org.apache.hadoop.hbase.CoprocessorEnvironment;
+import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.client.*;
@@ -33,6 +36,7 @@ import org.apache.hadoop.hbase.ipc.CoprocessorProtocol;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.SortedCopyOnWriteSet;
 import org.apache.hadoop.hbase.util.VersionInfo;
+import org.apache.hadoop.hbase.Server;
 
 import java.io.File;
 import java.io.IOException;
@@ -49,6 +53,8 @@ import java.util.*;
 public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
   public static final String REGION_COPROCESSOR_CONF_KEY =
       "hbase.coprocessor.region.classes";
+  public static final String USER_REGION_COPROCESSOR_CONF_KEY =
+      "hbase.coprocessor.user.region.classes";
   public static final String MASTER_COPROCESSOR_CONF_KEY =
       "hbase.coprocessor.master.classes";
   public static final String WAL_COPROCESSOR_CONF_KEY =
@@ -67,6 +73,12 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
     pathPrefix = UUID.randomUUID().toString();
   }
 
+  private static Set<String> coprocessorNames =
+      Collections.synchronizedSet(new HashSet<String>());
+  public static Set<String> getLoadedCoprocessors() {
+      return coprocessorNames;
+  }
+
   /**
    * Load system coprocessors. Read the class names from configuration.
    * Called by constructor.
@@ -79,7 +91,7 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
     if (defaultCPClasses == null || defaultCPClasses.length() == 0)
       return;
     StringTokenizer st = new StringTokenizer(defaultCPClasses, ",");
-    int priority = Coprocessor.Priority.SYSTEM.intValue();
+    int priority = Coprocessor.PRIORITY_SYSTEM;
     List<E> configured = new ArrayList<E>();
     while (st.hasMoreTokens()) {
       String className = st.nextToken();
@@ -90,7 +102,7 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
       Thread.currentThread().setContextClassLoader(cl);
       try {
         implClass = cl.loadClass(className);
-        configured.add(loadInstance(implClass, Coprocessor.Priority.SYSTEM));
+        configured.add(loadInstance(implClass, Coprocessor.PRIORITY_SYSTEM, conf));
         LOG.info("System coprocessor " + className + " was loaded " +
             "successfully with priority (" + priority++ + ").");
       } catch (ClassNotFoundException e) {
@@ -111,11 +123,12 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
    * @param path path to implementation jar
    * @param className the main class name
    * @param priority chaining priority
+   * @param conf configuration for coprocessor
    * @throws java.io.IOException Exception
    */
   @SuppressWarnings("deprecation")
-  public E load(Path path, String className, Coprocessor.Priority priority)
-      throws IOException {
+  public E load(Path path, String className, int priority,
+      Configuration conf) throws IOException {
     Class<?> implClass = null;
 
     // Have we already loaded the class, perhaps from an earlier region open
@@ -135,8 +148,9 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
         throw new IOException(path.toString() + ": not a jar file?");
       }
       FileSystem fs = path.getFileSystem(HBaseConfiguration.create());
-      Path dst = new Path("/tmp/." + pathPrefix +
-        "." + className + "." + System.currentTimeMillis() + ".jar");
+      Path dst = new Path(System.getProperty("java.io.tmpdir") +
+          java.io.File.separator +"." + pathPrefix +
+          "." + className + "." + System.currentTimeMillis() + ".jar");
       fs.copyToLocalFile(path, dst);
       fs.deleteOnExit(dst);
 
@@ -150,7 +164,7 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
       // load the jar and get the implementation main class
       String cp = System.getProperty("java.class.path");
       // NOTE: Path.toURL is deprecated (toURI instead) but the URLClassLoader
-      // unsuprisingly wants URLs, not URIs; so we will use the deprecated
+      // unsurprisingly wants URLs, not URIs; so we will use the deprecated
       // method which returns URLs for as long as it is available
       List<URL> paths = new ArrayList<URL>();
       paths.add(new File(dst.toString()).getCanonicalFile().toURL());
@@ -168,21 +182,28 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
       }
     }
 
-    return loadInstance(implClass, priority);
+    return loadInstance(implClass, priority, conf);
   }
 
   /**
    * @param implClass Implementation class
    * @param priority priority
+   * @param conf configuration
    * @throws java.io.IOException Exception
    */
-  public void load(Class<?> implClass, Coprocessor.Priority priority)
+  public void load(Class<?> implClass, int priority, Configuration conf)
       throws IOException {
-    E env = loadInstance(implClass, priority);
+    E env = loadInstance(implClass, priority, conf);
     coprocessors.add(env);
   }
 
-  public E loadInstance(Class<?> implClass, Coprocessor.Priority priority)
+  /**
+   * @param implClass Implementation class
+   * @param priority priority
+   * @param conf configuration
+   * @throws java.io.IOException Exception
+   */
+  public E loadInstance(Class<?> implClass, int priority, Configuration conf)
       throws IOException {
     // create the instance
     Coprocessor impl;
@@ -196,10 +217,13 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
       throw new IOException(e);
     }
     // create the environment
-    E env = createEnvironment(implClass, impl, priority, ++loadSequence);
+    E env = createEnvironment(implClass, impl, priority, ++loadSequence, conf);
     if (env instanceof Environment) {
       ((Environment)env).startup();
     }
+    // HBASE-4014: maintain list of loaded coprocessors for later crash analysis
+    // if server (master or regionserver) aborts.
+    coprocessorNames.add(implClass.getName());
     return env;
   }
 
@@ -207,7 +231,7 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
    * Called when a new Coprocessor class is loaded
    */
   public abstract E createEnvironment(Class<?> implClass, Coprocessor instance,
-      Coprocessor.Priority priority, int sequence);
+      int priority, int sequence, Configuration conf);
 
   public void shutdown(CoprocessorEnvironment e) {
     if (e instanceof Environment) {
@@ -235,14 +259,32 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
   }
 
   /**
+   * Find a coprocessor environment by class name
+   * @param className the class name
+   * @return the coprocessor, or null if not found
+   */
+  public CoprocessorEnvironment findCoprocessorEnvironment(String className) {
+    // initialize the coprocessors
+    for (E env: coprocessors) {
+      if (env.getInstance().getClass().getName().equals(className) ||
+          env.getInstance().getClass().getSimpleName().equals(className)) {
+        return env;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Environment priority comparator.
    * Coprocessors are chained in sorted order.
    */
-  static class EnvironmentPriorityComparator implements Comparator<CoprocessorEnvironment> {
-    public int compare(CoprocessorEnvironment env1, CoprocessorEnvironment env2) {
-      if (env1.getPriority().intValue() < env2.getPriority().intValue()) {
+  static class EnvironmentPriorityComparator
+      implements Comparator<CoprocessorEnvironment> {
+    public int compare(final CoprocessorEnvironment env1,
+        final CoprocessorEnvironment env2) {
+      if (env1.getPriority() < env2.getPriority()) {
         return -1;
-      } else if (env1.getPriority().intValue() > env2.getPriority().intValue()) {
+      } else if (env1.getPriority() > env2.getPriority()) {
         return 1;
       }
       if (env1.getLoadSequence() < env2.getLoadSequence()) {
@@ -436,24 +478,27 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
     /** The coprocessor */
     public Coprocessor impl;
     /** Chaining priority */
-    protected Coprocessor.Priority priority = Coprocessor.Priority.USER;
+    protected int priority = Coprocessor.PRIORITY_USER;
     /** Current coprocessor state */
     Coprocessor.State state = Coprocessor.State.UNINSTALLED;
     /** Accounting for tables opened by the coprocessor */
     protected List<HTableInterface> openTables =
       Collections.synchronizedList(new ArrayList<HTableInterface>());
     private int seq;
+    private Configuration conf;
 
     /**
      * Constructor
      * @param impl the coprocessor instance
      * @param priority chaining priority
      */
-    public Environment(final Coprocessor impl, Coprocessor.Priority priority, int seq) {
+    public Environment(final Coprocessor impl, final int priority,
+        final int seq, final Configuration conf) {
       this.impl = impl;
       this.priority = priority;
       this.state = Coprocessor.State.INSTALLED;
       this.seq = seq;
+      this.conf = conf;
     }
 
     /** Initialize the environment */
@@ -505,7 +550,7 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
     }
 
     @Override
-    public Coprocessor.Priority getPriority() {
+    public int getPriority() {
       return priority;
     }
 
@@ -526,6 +571,11 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
       return VersionInfo.getVersion();
     }
 
+    @Override
+    public Configuration getConfiguration() {
+      return conf;
+    }
+
     /**
      * Open a table from within the Coprocessor environment
      * @param tableName the table name
@@ -537,4 +587,65 @@ public abstract class CoprocessorHost<E extends CoprocessorEnvironment> {
       return new HTableWrapper(tableName);
     }
   }
+
+  protected void abortServer(final String service,
+      final Server server,
+      final CoprocessorEnvironment environment,
+      final Throwable e) {
+    String coprocessorName = (environment.getInstance()).toString();
+    server.abort("Aborting service: " + service + " running on : "
+            + server.getServerName() + " because coprocessor: "
+            + coprocessorName + " threw an exception.", e);
+  }
+
+  protected void abortServer(final CoprocessorEnvironment environment,
+                             final Throwable e) {
+    String coprocessorName = (environment.getInstance()).toString();
+    LOG.error("The coprocessor: " + coprocessorName + " threw an unexpected " +
+        "exception: " + e + ", but there's no specific implementation of " +
+        " abortServer() for this coprocessor's environment.");
+  }
+
+
+  /**
+   * This is used by coprocessor hooks which are declared to throw IOException
+   * (or its subtypes). For such hooks, we should handle throwable objects
+   * depending on the Throwable's type. Those which are instances of
+   * IOException should be passed on to the client. This is in conformance with
+   * the HBase idiom regarding IOException: that it represents a circumstance
+   * that should be passed along to the client for its own handling. For
+   * example, a coprocessor that implements access controls would throw a
+   * subclass of IOException, such as AccessDeniedException, in its preGet()
+   * method to prevent an unauthorized client's performing a Get on a particular
+   * table.
+   * @param env Coprocessor Environment
+   * @param e Throwable object thrown by coprocessor.
+   * @exception IOException Exception
+   */
+  protected void handleCoprocessorThrowable(final CoprocessorEnvironment env,
+                                            final Throwable e)
+      throws IOException {
+    if (e instanceof IOException) {
+      throw (IOException)e;
+    }
+    // If we got here, e is not an IOException. A loaded coprocessor has a
+    // fatal bug, and the server (master or regionserver) should remove the
+    // faulty coprocessor from its set of active coprocessors. Setting
+    // 'hbase.coprocessor.abortonerror' to true will cause abortServer(),
+    // which may be useful in development and testing environments where
+    // 'failing fast' for error analysis is desired.
+    if (env.getConfiguration().getBoolean("hbase.coprocessor.abortonerror",false)) {
+      // server is configured to abort.
+      abortServer(env, e);
+    } else {
+      LOG.error("Removing coprocessor '" + env.toString() + "' from " +
+          "environment because it threw:  " + e,e);
+      coprocessors.remove(env);
+      throw new DoNotRetryIOException("Coprocessor: '" + env.toString() +
+          "' threw: '" + e + "' and has been removed" + "from the active " +
+          "coprocessor set.", e);
+    }
+  }
 }
+
+

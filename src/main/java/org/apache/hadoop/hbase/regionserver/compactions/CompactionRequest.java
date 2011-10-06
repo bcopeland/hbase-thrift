@@ -53,7 +53,7 @@ public class CompactionRequest implements Comparable<CompactionRequest>,
     private final long totalSize;
     private final boolean isMajor;
     private int p;
-    private final Date date;
+    private final Long timeInNanos;
     private HRegionServer server = null;
 
     public CompactionRequest(HRegion r, Store s,
@@ -71,13 +71,13 @@ public class CompactionRequest implements Comparable<CompactionRequest>,
       this.totalSize = sz;
       this.isMajor = isMajor;
       this.p = p;
-      this.date = new Date();
+      this.timeInNanos = System.nanoTime();
     }
 
     /**
      * This function will define where in the priority queue the request will
      * end up.  Those with the highest priorities will be first.  When the
-     * priorities are the same it will It will first compare priority then date
+     * priorities are the same it will first compare priority then date
      * to maintain a FIFO functionality.
      *
      * <p>Note: The date is only accurate to the millisecond which means it is
@@ -98,7 +98,7 @@ public class CompactionRequest implements Comparable<CompactionRequest>,
         return compareVal;
       }
 
-      compareVal = date.compareTo(request.date);
+      compareVal = timeInNanos.compareTo(request.timeInNanos);
       if (compareVal != 0) {
         return compareVal;
       }
@@ -164,7 +164,7 @@ public class CompactionRequest implements Comparable<CompactionRequest>,
         ", fileCount=" + files.size() +
         ", fileSize=" + StringUtils.humanReadableInt(totalSize) +
           ((fsList.isEmpty()) ? "" : " (" + fsList + ")") +
-        ", priority=" + p + ", date=" + date;
+        ", priority=" + p + ", time=" + timeInNanos;
     }
 
     @Override
@@ -185,6 +185,9 @@ public class CompactionRequest implements Comparable<CompactionRequest>,
           if (s.getCompactPriority() <= 0) {
             server.compactSplitThread
               .requestCompaction(r, s, "Recursive enqueue");
+          } else {
+            // see if the compaction has caused us to exceed max region size
+            server.compactSplitThread.requestSplit(r);
           }
         }
       } catch (IOException ex) {

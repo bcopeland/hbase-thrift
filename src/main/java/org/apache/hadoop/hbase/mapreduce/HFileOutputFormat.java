@@ -32,6 +32,8 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.filecache.DistributedCache;
 import org.apache.hadoop.fs.FileSystem;
@@ -45,19 +47,18 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.io.hfile.Compression;
 import org.apache.hadoop.hbase.io.hfile.HFile;
-import org.apache.hadoop.hbase.mapreduce.hadoopbackport.TotalOrderPartitioner;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.regionserver.TimeRangeTracker;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.SequenceFile;
+import org.apache.hadoop.io.WritableUtils;
 import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Partitioner;
 import org.apache.hadoop.mapreduce.RecordWriter;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputCommitter;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 
 /**
  * Writes HFiles. Passed KeyValues must arrive in order.
@@ -71,13 +72,14 @@ import org.apache.commons.logging.LogFactory;
 public class HFileOutputFormat extends FileOutputFormat<ImmutableBytesWritable, KeyValue> {
   static Log LOG = LogFactory.getLog(HFileOutputFormat.class);
   static final String COMPRESSION_CONF_KEY = "hbase.hfileoutputformat.families.compression";
-  
+  TimeRangeTracker trt = new TimeRangeTracker();
+
   public RecordWriter<ImmutableBytesWritable, KeyValue> getRecordWriter(final TaskAttemptContext context)
   throws IOException, InterruptedException {
     // Get the path of the temporary output file
     final Path outputPath = FileOutputFormat.getOutputPath(context);
     final Path outputdir = new FileOutputCommitter(outputPath, context).getWorkPath();
-    Configuration conf = context.getConfiguration();
+    final Configuration conf = context.getConfiguration();
     final FileSystem fs = outputdir.getFileSystem(conf);
     // These configs. are from hbase-*.xml
     final long maxsize = conf.getLong("hbase.hregion.max.filesize",
@@ -130,11 +132,12 @@ public class HFileOutputFormat extends FileOutputFormat<ImmutableBytesWritable, 
 
         // create a new HLog writer, if necessary
         if (wl == null || wl.writer == null) {
-          wl = getNewWriter(family);
+          wl = getNewWriter(family, conf);
         }
 
         // we now have the proper HLog writer. full steam ahead
         kv.updateLatestStamp(this.now);
+        trt.includeTimestamp(kv);
         wl.writer.append(kv);
         wl.written += length;
 
@@ -160,12 +163,13 @@ public class HFileOutputFormat extends FileOutputFormat<ImmutableBytesWritable, 
        * @return A WriterLength, containing a new HFile.Writer.
        * @throws IOException
        */
-      private WriterLength getNewWriter(byte[] family) throws IOException {
+      private WriterLength getNewWriter(byte[] family, Configuration conf)
+          throws IOException {
         WriterLength wl = new WriterLength();
         Path familydir = new Path(outputdir, Bytes.toString(family));
         String compression = compressionMap.get(family);
         compression = compression == null ? defaultCompression : compression;
-        wl.writer = new HFile.Writer(fs,
+        wl.writer = HFile.getWriterFactory(conf).createWriter(fs,
           StoreFile.getUniqueFile(fs, familydir), blocksize,
           compression, KeyValue.KEY_COMPARATOR);
         this.writers.put(family, wl);
@@ -178,8 +182,10 @@ public class HFileOutputFormat extends FileOutputFormat<ImmutableBytesWritable, 
               Bytes.toBytes(System.currentTimeMillis()));
           w.appendFileInfo(StoreFile.BULKLOAD_TASK_KEY,
               Bytes.toBytes(context.getTaskAttemptID().toString()));
-          w.appendFileInfo(StoreFile.MAJOR_COMPACTION_KEY, 
+          w.appendFileInfo(StoreFile.MAJOR_COMPACTION_KEY,
               Bytes.toBytes(true));
+          w.appendFileInfo(StoreFile.TIMERANGE_KEY,
+              WritableUtils.toByteArray(trt));
           w.close();
         }
       }
@@ -271,13 +277,20 @@ public class HFileOutputFormat extends FileOutputFormat<ImmutableBytesWritable, 
    * The user should be sure to set the map output value class to either KeyValue or Put before
    * running this function.
    */
-  public static void configureIncrementalLoad(Job job, HTable table) throws IOException {
+  public static void configureIncrementalLoad(Job job, HTable table)
+  throws IOException {
     Configuration conf = job.getConfiguration();
-    job.setPartitionerClass(TotalOrderPartitioner.class);
+    Class<? extends Partitioner> topClass;
+    try {
+      topClass = getTotalOrderPartitionerClass();
+    } catch (ClassNotFoundException e) {
+      throw new IOException("Failed getting TotalOrderPartitioner", e);
+    }
+    job.setPartitionerClass(topClass);
     job.setOutputKeyClass(ImmutableBytesWritable.class);
     job.setOutputValueClass(KeyValue.class);
     job.setOutputFormatClass(HFileOutputFormat.class);
-    
+
     // Based on the configured map output class, set the correct reducer to properly
     // sort the incoming values.
     // TODO it would be nice to pick one or the other of these formats.
@@ -288,7 +301,7 @@ public class HFileOutputFormat extends FileOutputFormat<ImmutableBytesWritable, 
     } else {
       LOG.warn("Unknown map output value type:" + job.getMapOutputValueClass());
     }
-    
+
     LOG.info("Looking up current regions for table " + table);
     List<ImmutableBytesWritable> startKeys = getRegionStartKeys(table);
     LOG.info("Configuring " + startKeys.size() + " reduce partitions " +
@@ -302,10 +315,14 @@ public class HFileOutputFormat extends FileOutputFormat<ImmutableBytesWritable, 
     FileSystem fs = partitionsPath.getFileSystem(conf);
     writePartitions(conf, partitionsPath, startKeys);
     partitionsPath.makeQualified(fs);
+    
     URI cacheUri;
     try {
+      // Below we make explicit reference to the bundled TOP.  Its cheating.
+      // We are assume the define in the hbase bundled TOP is as it is in
+      // hadoop (whether 0.20 or 0.22, etc.)
       cacheUri = new URI(partitionsPath.toString() + "#" +
-          TotalOrderPartitioner.DEFAULT_PATH);
+        org.apache.hadoop.hbase.mapreduce.hadoopbackport.TotalOrderPartitioner.DEFAULT_PATH);
     } catch (URISyntaxException e) {
       throw new IOException(e);
     }
@@ -317,7 +334,28 @@ public class HFileOutputFormat extends FileOutputFormat<ImmutableBytesWritable, 
     
     LOG.info("Incremental table output configured.");
   }
-  
+
+  /**
+   * If > hadoop 0.20, then we want to use the hadoop TotalOrderPartitioner.
+   * If 0.20, then we want to use the TOP that we have under hadoopbackport.
+   * This method is about hbase being able to run on different versions of
+   * hadoop.  In 0.20.x hadoops, we have to use the TOP that is bundled with
+   * hbase.  Otherwise, we use the one in Hadoop.
+   * @return Instance of the TotalOrderPartitioner class
+   * @throws ClassNotFoundException If can't find a TotalOrderPartitioner.
+   */
+  private static Class<? extends Partitioner> getTotalOrderPartitionerClass()
+  throws ClassNotFoundException {
+    Class<? extends Partitioner> clazz = null;
+    try {
+      clazz = (Class<? extends Partitioner>) Class.forName("org.apache.hadoop.mapreduce.lib.partition.TotalOrderPartitioner");
+    } catch (ClassNotFoundException e) {
+      clazz =
+        (Class<? extends Partitioner>) Class.forName("org.apache.hadoop.hbase.mapreduce.hadoopbackport.TotalOrderPartitioner");
+    }
+    return clazz;
+  }
+
   /**
    * Run inside the task to deserialize column family to compression algorithm
    * map from the

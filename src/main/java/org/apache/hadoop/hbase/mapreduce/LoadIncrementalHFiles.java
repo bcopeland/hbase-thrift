@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Set;
@@ -36,6 +37,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.logging.Log;
@@ -85,6 +87,7 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
   private HBaseAdmin hbAdmin;
   private Configuration cfg;
   private Set<Future> futures = new HashSet<Future>();
+  private Set<Future> futuresForSplittingHFile = new HashSet<Future>();
 
   public static String NAME = "completebulkload";
 
@@ -188,12 +191,29 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
     try {
       queue = discoverLoadQueue(hfofDir);
       // outer loop picks up LoadQueueItem due to HFile split
-      while (!queue.isEmpty()) {
+      while (!queue.isEmpty() || futuresForSplittingHFile.size() > 0) {
         Pair<byte[][],byte[][]> startEndKeys = table.getStartEndKeys();
         // inner loop groups callables
         while (!queue.isEmpty()) {
           LoadQueueItem item = queue.remove();
           tryLoad(item, conn, table, queue, startEndKeys, pool);
+        }
+        Iterator<Future> iter = futuresForSplittingHFile.iterator();
+        while (iter.hasNext()) {
+          boolean timeoutSeen = false;
+          Future future = iter.next();
+          try {
+            future.get(20, TimeUnit.MILLISECONDS);
+            break;  // we have at least two new HFiles to process
+          } catch (ExecutionException ee) {
+            LOG.error(ee);
+          } catch (InterruptedException ie) {
+            LOG.error(ie);
+          } catch (TimeoutException te) {
+              timeoutSeen = true;
+          } finally {
+            if (!timeoutSeen) iter.remove();
+          }
         }
       }
       for (Future<Void> future : futures) {
@@ -247,8 +267,10 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
 
     // Add these back at the *front* of the queue, so there's a lower
     // chance that the region will just split again before we get there.
-    queue.addFirst(new LoadQueueItem(item.family, botOut));
-    queue.addFirst(new LoadQueueItem(item.family, topOut));
+    synchronized (queue) {
+      queue.addFirst(new LoadQueueItem(item.family, botOut));
+      queue.addFirst(new LoadQueueItem(item.family, topOut));
+    }
     LOG.info("Successfully split into new HFiles " + botOut + " and " + topOut);
   }
 
@@ -260,12 +282,13 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
    */
   private boolean tryLoad(final LoadQueueItem item,
       final HConnection conn, final HTable table,
-      final Deque<LoadQueueItem> queue, Pair<byte[][],byte[][]> startEndKeys,
+      final Deque<LoadQueueItem> queue,
+      final Pair<byte[][],byte[][]> startEndKeys,
       ExecutorService pool)
   throws IOException {
     final Path hfilePath = item.hfilePath;
     final FileSystem fs = hfilePath.getFileSystem(getConf());
-    HFile.Reader hfr = new HFile.Reader(fs, hfilePath, null, false, false);
+    HFile.Reader hfr = HFile.createReader(fs, hfilePath, null, false, false);
     final byte[] first, last;
     try {
       hfr.loadFileInfo();
@@ -292,12 +315,21 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
     if (idx < 0) {
       idx = -(idx+1)-1;
     }
+    final int indexForCallable = idx;
     boolean lastKeyInRange =
       Bytes.compareTo(last, startEndKeys.getSecond()[idx]) < 0 ||
       Bytes.equals(startEndKeys.getSecond()[idx], HConstants.EMPTY_BYTE_ARRAY);
     if (!lastKeyInRange) {
-      splitStoreFileAndRequeue(item, queue, table,
-          startEndKeys.getFirst()[idx], startEndKeys.getSecond()[idx]);
+      Callable<Void> callable = new Callable<Void>() {
+        public Void call() throws Exception {
+          splitStoreFileAndRequeue(item, queue, table,
+              startEndKeys.getFirst()[indexForCallable],
+              startEndKeys.getSecond()[indexForCallable]);
+          return (Void)null;
+        }
+      };
+      futuresForSplittingHFile.add(pool.submit(callable));
+
       return true;
     }
 
@@ -358,7 +390,7 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
 
       halfWriter = new StoreFile.Writer(
           fs, outFile, blocksize, compression, conf, KeyValue.COMPARATOR,
-          bloomFilterType, 0, false);
+          bloomFilterType, 0);
       HFileScanner scanner = halfReader.getScanner(false, false);
       scanner.seekTo();
       do {
@@ -458,7 +490,7 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
       for (Path hfile : hfiles) {
         if (hfile.getName().startsWith("_")) continue;
         
-        HFile.Reader reader = new HFile.Reader(fs, hfile, null, false, false);
+        HFile.Reader reader = HFile.createReader(fs, hfile, null, false, false);
         final byte[] first, last;
         try {
           reader.loadFileInfo();

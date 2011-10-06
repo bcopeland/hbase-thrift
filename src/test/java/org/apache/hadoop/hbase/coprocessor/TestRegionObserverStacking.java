@@ -30,10 +30,11 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.hbase.Coprocessor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Put;
-import org.apache.hadoop.hbase.coprocessor.Coprocessor.Priority;
 import org.apache.hadoop.hbase.regionserver.RegionCoprocessorHost;
+import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.util.Bytes;
 
@@ -46,7 +47,8 @@ public class TestRegionObserverStacking extends TestCase {
     long id;
     @Override
     public void postPut(final ObserverContext<RegionCoprocessorEnvironment> c,
-        final Map<byte[], List<KeyValue>> familyMap, final boolean writeToWAL)
+        final Put put, final WALEdit edit,
+        final boolean writeToWAL)
         throws IOException {
       id = System.currentTimeMillis();
       try {
@@ -60,7 +62,8 @@ public class TestRegionObserverStacking extends TestCase {
     long id;
     @Override
     public void postPut(final ObserverContext<RegionCoprocessorEnvironment> c,
-        final Map<byte[], List<KeyValue>> familyMap, final boolean writeToWAL)
+        final Put put, final WALEdit edit,
+        final boolean writeToWAL)
         throws IOException {
       id = System.currentTimeMillis();
       try {
@@ -75,7 +78,8 @@ public class TestRegionObserverStacking extends TestCase {
 
     @Override
     public void postPut(final ObserverContext<RegionCoprocessorEnvironment> c,
-        final Map<byte[], List<KeyValue>> familyMap, final boolean writeToWAL)
+        final Put put, final WALEdit edit,
+        final boolean writeToWAL)
         throws IOException {
       id = System.currentTimeMillis();
       try {
@@ -91,9 +95,9 @@ public class TestRegionObserverStacking extends TestCase {
     for(byte [] family : families) {
       htd.addFamily(new HColumnDescriptor(family));
     }
-    HRegionInfo info = new HRegionInfo(htd, null, null, false);
+    HRegionInfo info = new HRegionInfo(htd.getName(), null, null, false);
     Path path = new Path(DIR + callingMethod);
-    HRegion r = HRegion.createHRegion(info, path, conf);
+    HRegion r = HRegion.createHRegion(info, path, conf, htd);
     // this following piece is a hack. currently a coprocessorHost
     // is secretly loaded at OpenRegionHandler. we don't really
     // start a region server here, so just manually create cphost
@@ -109,12 +113,13 @@ public class TestRegionObserverStacking extends TestCase {
     byte[] A = Bytes.toBytes("A");
     byte[][] FAMILIES = new byte[][] { A } ;
 
+    Configuration conf = HBaseConfiguration.create();
     HRegion region = initHRegion(TABLE, getClass().getName(),
-      HBaseConfiguration.create(), FAMILIES);
+      conf, FAMILIES);
     RegionCoprocessorHost h = region.getCoprocessorHost();
-    h.load(ObserverA.class, Priority.HIGHEST);
-    h.load(ObserverB.class, Priority.USER);
-    h.load(ObserverC.class, Priority.LOWEST);
+    h.load(ObserverA.class, Coprocessor.PRIORITY_HIGHEST, conf);
+    h.load(ObserverB.class, Coprocessor.PRIORITY_USER, conf);
+    h.load(ObserverC.class, Coprocessor.PRIORITY_LOWEST, conf);
 
     Put put = new Put(ROW);
     put.add(A, A, A);
@@ -133,4 +138,3 @@ public class TestRegionObserverStacking extends TestCase {
     assertTrue(idB < idC);
   }
 }
-

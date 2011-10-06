@@ -77,8 +77,23 @@
           <title>DataNode</title>
           <para>Each DataNode server will have a DataNode log for HDFS, as well as a RegionServer log for HBase.</para>
           <para>Additionally, each DataNode server will also have a TaskTracker log for MapReduce task execution.</para>
-         </section>        
-      </section>      
+         </section>
+        </section>
+        <section xml:id="trouble.log.levels">
+          <title>Log Levels</title>
+         <section xml:id="rpc.logging"><title>Enabling RPC-level logging</title>
+          <para>Enabling the RPC-level logging on a RegionServer can often given
+           insight on timings at the server.  Once enabled, the amount of log
+           spewed is voluminous.  It is not recommended that you leave this
+           logging on for more than short bursts of time.  To enable RPC-level
+           logging, browse to the RegionServer UI and click on 
+           <emphasis>Log Level</emphasis>.  Set the log level to <varname>DEBUG</varname> for the package
+           <classname>org.apache.hadoop.ipc</classname> (Thats right, for
+           <classname>hadoop.ipc</classname>, NOT, <classname>hbase.ipc</classname>).  Then tail the RegionServers log.  Analyze.</para>
+           <para>To disable, set the logging level back to <varname>INFO</varname> level.
+           </para>
+         </section>                 
+       </section>      
       <section xml:id="trouble.log.gc">
         <title>JVM Garbage Collection Logs</title>
           <para>HBase is memory intensive, and using the default GC you can see long pauses in all threads including the <emphasis>Juliet Pause</emphasis> aka "GC of Death". 
@@ -164,7 +179,30 @@ export HBASE_OPTS="-XX:NewSize=64m -XX:MaxNewSize=64m &lt;cms options from above
     </section>
     <section xml:id="trouble.tools">
       <title>Tools</title>
-      <section xml:id="trouble.tools.searchhadoop">
+         <section xml:id="trouble.tools.builtin">
+           <title>Builtin Tools</title>
+            <section xml:id="trouble.tools.builtin.webmaster">
+              <title>Master Web Interface</title>
+              <para>The Master starts a web-interface on port 60010 by default.
+              </para>
+              <para>The Master web UI lists created tables and their definition (e.g., ColumnFamilies, blocksize, etc.).  Additionally, 
+              the available RegionServers in the cluster are listed along with selected high-level metrics (requests, number of regions, usedHeap, maxHeap).
+              The Master web UI allows navigation to each RegionServer's web UI.
+              </para>
+            </section>
+            <section xml:id="trouble.tools.builtin.webregion">
+              <title>RegionServer Web Interface</title>
+              <para>RegionServers starts a web-interface on port 60030 by default.
+              </para>
+              <para>The RegionServer web UI lists online regions and their start/end keys, as well as point-in-time RegionServer metrics (requests, regions, storeFileIndexSize, compactionQueueSize, etc.).
+              </para>
+              <para>See <xref linkend="hbase_metrics"/> for more information in metric definitions.
+            </para>
+          </section>
+       </section>
+       <section xml:id="trouble.tools.external">
+          <title>External Tools</title>
+       <section xml:id="trouble.tools.searchhadoop">
         <title>search-hadoop.com</title>
         <para>
         <link xlink:href="http://search-hadoop.com">search-hadoop.com</link> indexes all the mailing lists and <link xlink:href="https://issues.apache.org/jira/browse/HBASE">JIRA</link>, it’s really helpful when looking for Hadoop/HBase-specific issues.
@@ -400,7 +438,8 @@ hadoop   17789  155 35.2 9067824 8604364 ?     S&lt;l  Mar04 9855:48 /usr/java/j
           </para>
        </section>
     </section>
-
+    </section>
+    
     <section xml:id="trouble.client">
       <title>Client</title>
        <section xml:id="trouble.client.scantimeout">
@@ -418,8 +457,93 @@ hadoop   17789  155 35.2 9067824 8604364 ?     S&lt;l  Mar04 9855:48 /usr/java/j
             On your clients, edit <filename>$HBASE_HOME/conf/log4j.properties</filename> and change this: <code>log4j.logger.org.apache.hadoop.hbase=DEBUG</code> to this: <code>log4j.logger.org.apache.hadoop.hbase=INFO</code>, or even <code>log4j.logger.org.apache.hadoop.hbase=WARN</code>. 
             </para>
        </section>    
+       <section xml:id="trouble.client.longpauseswithcompression">
+            <title>Long Client Pauses With Compression</title>
+            <para>This is a fairly frequent question on the HBase dist-list.  The scenario is that a client is typically inserting a lot of data into a 
+            relatively un-optimized HBase cluster.  Compression can exacerbate the pauses, although it is not the source of the problem.</para>
+            <para>See <xref linkend="precreate.regions"/> on the pattern for pre-creating regions and confirm that the table isn't starting with a single region.</para>
+            <para>See <xref linkend="perf.configurations"/> for cluster configuration, particularly <code>hbase.hstore.blockingStoreFiles</code>, <code>hbase.hregion.memstore.block.multiplier</code>, 
+            <code>MAX_FILESIZE</code> (region size), and <code>MEMSTORE_FLUSHSIZE.</code>  </para>
+            <para>A slightly longer explanation of why pauses can happen is as follows:  Puts are sometimes blocked on the MemStores which are blocked by the flusher thread which is blocked because there are 
+            too many files to compact because the compactor is given too many small files to compact and has to compact the same data repeatedly.  This situation can occur even with minor compactions.
+            Compounding this situation, HBase doesn't compress data in memory.  Thus, the 64MB that lives in the MemStore could become a 6MB file after compression - which results in a smaller StoreFile.  The upside is that
+            more data is packed into the same region, but performance is achieved by being able to write larger files - which is why HBase waits until the flushize before writing a new StoreFile.  And smaller StoreFiles
+            become targets for compaction.  Without compression the files are much bigger and don't need as much compaction, however this is at the expense of I/O.   
+            </para>
+            <para>
+            For additional information, see this thread on <link xlink:href="http://search-hadoop.com/m/WUnLM6ojHm1/Long+client+pauses+with+compression&amp;subj=Long+client+pauses+with+compression">Long client pauses with compression</link>.
+            </para>
+            
+       </section>    
+       <section xml:id="trouble.client.zookeeper">
+            <title>ZooKeeper Client Connection Errors</title>
+            <para>Errors like this...
+<programlisting>
+11/07/05 11:26:41 WARN zookeeper.ClientCnxn: Session 0x0 for server null,
+ unexpected error, closing socket connection and attempting reconnect
+ java.net.ConnectException: Connection refused: no further information
+        at sun.nio.ch.SocketChannelImpl.checkConnect(Native Method)
+        at sun.nio.ch.SocketChannelImpl.finishConnect(Unknown Source)
+        at org.apache.zookeeper.ClientCnxn$SendThread.run(ClientCnxn.java:1078)
+ 11/07/05 11:26:43 INFO zookeeper.ClientCnxn: Opening socket connection to
+ server localhost/127.0.0.1:2181
+ 11/07/05 11:26:44 WARN zookeeper.ClientCnxn: Session 0x0 for server null,
+ unexpected error, closing socket connection and attempting reconnect
+ java.net.ConnectException: Connection refused: no further information
+        at sun.nio.ch.SocketChannelImpl.checkConnect(Native Method)
+        at sun.nio.ch.SocketChannelImpl.finishConnect(Unknown Source)
+        at org.apache.zookeeper.ClientCnxn$SendThread.run(ClientCnxn.java:1078)
+ 11/07/05 11:26:45 INFO zookeeper.ClientCnxn: Opening socket connection to
+ server localhost/127.0.0.1:2181
+</programlisting>
+            ... are either due to ZooKeeper being down, or unreachable due to network issues.            
+            </para>
+            
+       </section>    
 
-    </section>    
+    </section>
+    <section xml:id="trouble.namenode">
+      <title>NameNode</title>
+       <section xml:id="trouble.namenode.disk">
+            <title>HDFS Utilization of Tables and Regions</title>
+            <para>To determine how much space HBase is using on HDFS use the <code>hadoop</code> shell commands from the NameNode.  For example... </para>
+            <para><programlisting>hadoop fs -dus /hbase/</programlisting> ...returns the summarized disk utilization for all HBase objects.  </para>
+            <para><programlisting>hadoop fs -dus /hbase/myTable</programlisting> ...returns the summarized disk utilization for the HBase table 'myTable'. </para>
+            <para><programlisting>hadoop fs -du /hbase/myTable</programlisting> ...returns a list of the regions under the HBase table 'myTable' and their disk utilization. </para>
+       </section>    
+       <section xml:id="trouble.namenode.hbase.objects">
+            <title>Browsing HDFS for HBase Objects</title>
+            <para>Somtimes it will be necessary to explore the HBase objects that exist on HDFS.  These objects could include the WALs (Write Ahead Logs), tables, regions, StoreFiles, etc.
+            The easiest way to do this is with the NameNode web application that runs on port 50070.  The NameNode web application will provide links to the all the DataNodes in the cluster so that
+            they can be browsed seamlessly. </para>
+            <para>The HDFS directory structure of HBase tables in the cluster is...
+            <programlisting>
+<filename>/hbase</filename>
+     <filename>/&lt;Table&gt;</filename>             (Tables in the cluster)
+          <filename>/&lt;Region&gt;</filename>           (Regions for the table)
+               <filename>/&lt;ColumnFamiy&gt;</filename>      (ColumnFamilies for the Region for the table)
+                    <filename>/&lt;StoreFile&gt;</filename>        (StoreFiles for the ColumnFamily for the Regions for the table)
+            </programlisting>
+            </para>
+            <para>The HDFS directory structure of HBase WAL is..
+            <programlisting>
+<filename>/hbase</filename>
+     <filename>/.logs</filename>     
+          <filename>/&lt;RegionServer&gt;</filename>    (RegionServers)
+               <filename>/&lt;HLog&gt;</filename>           (WAL HLog files for the RegionServer)
+            </programlisting>
+            </para>
+          <section xml:id="trouble.namenode.uncompaction">
+            <title>Use Cases</title>
+              <para>Two common use-cases for querying HDFS for HBase objects is research the degree of uncompaction of a table.  If there are a large number of StoreFiles for each ColumnFamily it could 
+              indicate the need for a major compaction.  Additionally, after a major compaction if the resulting StoreFile is "small" it could indicate the need for a reduction of ColumnFamilies for
+              the table.
+		    </para>
+		  </section>
+
+       </section>    
+     </section>
+        
     <section xml:id="trouble.rs">
       <title>RegionServer</title>
       <section xml:id="trouble.rs.startup">
@@ -458,17 +582,34 @@ java.lang.UnsatisfiedLinkError: no gplcompression in java.library.path
         at java.lang.Runtime.loadLibrary0(Runtime.java:823)
         at java.lang.System.loadLibrary(System.java:1028)
             </programlisting>
-            .. then there is a path issue with the compression libraries.  See the Configuration section on <link linkend="lzo">LZO compression configuration</link>.
+            .. then there is a path issue with the compression libraries.  See the Configuration section on <link linkend="lzo.compression">LZO compression configuration</link>.
             </para>
           </section> 
       </section>    
       <section xml:id="trouble.rs.runtime">
         <title>Runtime Errors</title>
-        
+
+        <section xml:id="trouble.rs.runtime.hang">
+           <title>RegionServer Hanging</title>
+           <para>
+            Are you running an old JVM (&lt; 1.6.0_u21?)?  When you look at a thread dump,
+            does it look like threads are BLOCKED but no one holds the lock all are
+            blocked on?  See <link xlink:href="https://issues.apache.org/jira/browse/HBASE-3622">HBASE 3622 Deadlock in HBaseServer (JVM bug?)</link>.
+            Adding <code>-XX:+UseMembar</code> to the HBase <varname>HBASE_OPTS</varname> in <filename>conf/hbase-env.sh</filename>
+            may fix it.
+            </para>
+        </section>
         <section xml:id="trouble.rs.runtime.filehandles">
            <title>java.io.IOException...(Too many open files)</title>
            <para>
-           See the Getting Started section on <link linkend="ulimit">ulimit and nproc configuration</link>.
+           If you see log messages like this...
+<programlisting>
+2010-09-13 01:24:17,336 WARN org.apache.hadoop.hdfs.server.datanode.DataNode: 
+Disk-related IOException in BlockReceiver constructor. Cause is java.io.IOException: Too many open files
+        at java.io.UnixFileSystem.createFileExclusively(Native Method)
+        at java.io.File.createNewFile(File.java:883)
+</programlisting>
+           ... see the Getting Started section on <link linkend="ulimit">ulimit and nproc configuration</link>.
            </para>
         </section>
         <section xml:id="trouble.rs.runtime.xceivers">
@@ -562,6 +703,20 @@ ERROR org.apache.hadoop.hbase.regionserver.HRegionServer: ZooKeeper session expi
            </para>
            See <xref linkend="trouble.zookeeper.general"/> for other general information about ZooKeeper troubleshooting.
         </section>
+        <section xml:id="trouble.rs.runtime.notservingregion">
+           <title>NotServingRegionException</title>
+           <para>This exception is "normal" when found in the RegionServer logs at DEBUG level.  This exception is returned back to the client
+           and then the client goes back to .META. to find the new location of the moved region.</para>
+           <para>However, if the NotServingRegionException is logged ERROR, then the client ran out of retries and something probably wrong.</para>
+        </section>
+        <section xml:id="trouble.rs.runtime.double_listed_regions">
+           <title>Regions listed by domain name, then IP</title>
+           <para>
+           Fix your DNS.  In versions of HBase before 0.92.x, reverse DNS needs to give same answer
+           as forward lookup. See <link xlink:href="https://issues.apache.org/jira/browse/HBASE-3431">HBASE 3431
+           RegionServer is not using the name given it by the master; double entry in master listing of servers</link> for gorey details.
+          </para>
+          </section>
 
       </section>    
       <section xml:id="trouble.rs.shutdown">

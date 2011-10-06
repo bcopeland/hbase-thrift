@@ -21,21 +21,21 @@ package org.apache.hadoop.hbase.io.hfile;
 
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.SoftReference;
-import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
-import org.apache.hadoop.hbase.io.hfile.LruBlockCache.CacheStats;
+import org.apache.hadoop.conf.Configuration;
 
 
 /**
  * Simple one RFile soft reference cache.
  */
 public class SimpleBlockCache implements BlockCache {
-  private static class Ref extends SoftReference<ByteBuffer> {
+  private static class Ref extends SoftReference<Cacheable> {
     public String blockId;
-    public Ref(String blockId, ByteBuffer buf, ReferenceQueue q) {
-      super(buf, q);
+    public Ref(String blockId, Cacheable block, ReferenceQueue q) {
+      super(block, q);
       this.blockId = blockId;
     }
   }
@@ -63,12 +63,12 @@ public class SimpleBlockCache implements BlockCache {
   /**
    * @return the size
    */
-  public synchronized int size() {
+  public synchronized long size() {
     processQueue();
     return cache.size();
   }
 
-  public synchronized ByteBuffer getBlock(String blockName, boolean caching) {
+  public synchronized Cacheable getBlock(String blockName, boolean caching) {
     processQueue(); // clear out some crap.
     Ref ref = cache.get(blockName);
     if (ref == null)
@@ -76,13 +76,13 @@ public class SimpleBlockCache implements BlockCache {
     return ref.get();
   }
 
-  public synchronized void cacheBlock(String blockName, ByteBuffer buf) {
-    cache.put(blockName, new Ref(blockName, buf, q));
+  public synchronized void cacheBlock(String blockName, Cacheable block) {
+    cache.put(blockName, new Ref(blockName, block, q));
   }
 
-  public synchronized void cacheBlock(String blockName, ByteBuffer buf,
+  public synchronized void cacheBlock(String blockName, Cacheable block,
       boolean inMemory) {
-    cache.put(blockName, new Ref(blockName, buf, q));
+    cache.put(blockName, new Ref(blockName, block, q));
   }
 
   @Override
@@ -99,4 +99,34 @@ public class SimpleBlockCache implements BlockCache {
     // TODO: implement this if we ever actually use this block cache
     return null;
   }
+
+  @Override
+  public long getFreeSize() {
+    // TODO: implement this if we ever actually use this block cache
+    return 0;
+  }
+
+  @Override
+  public long getCurrentSize() {
+    // TODO: implement this if we ever actually use this block cache
+    return 0;
+  }
+
+  @Override
+  public long getEvictedCount() {
+    // TODO: implement this if we ever actually use this block cache
+    return 0;
+  }
+
+  @Override
+  public int evictBlocksByPrefix(String string) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public List<BlockCacheColumnFamilySummary> getBlockCacheColumnFamilySummaries(Configuration conf) {
+    throw new UnsupportedOperationException();
+  }
+
 }
+

@@ -20,12 +20,18 @@
 package org.apache.hadoop.hbase.ipc;
 
 import java.io.IOException;
+import java.util.List;
 
 import org.apache.hadoop.hbase.ClusterStatus;
 import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.UnknownRegionException;
-import org.apache.hadoop.ipc.VersionedProtocol;
+import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.coprocessor.ObserverContext;
+import org.apache.hadoop.hbase.ipc.VersionedProtocol;
+
+
 
 /**
  * Clients interact with the HMasterInterface to gain access to meta-level
@@ -53,9 +59,9 @@ public interface HMasterInterface extends VersionedProtocol {
   // Admin tools would use these cmds
 
   /**
-   * Creates a new table.  If splitKeys are specified, then the table will be
-   * created with an initial set of multiple regions.  If splitKeys is null,
-   * the table will be created with a single region.
+   * Creates a new table asynchronously.  If splitKeys are specified, then the
+   * table will be created with an initial set of multiple regions.
+   * If splitKeys is null, the table will be created with a single region.
    * @param desc table descriptor
    * @param splitKeys
    * @throws IOException
@@ -69,6 +75,19 @@ public interface HMasterInterface extends VersionedProtocol {
    * @throws IOException e
    */
   public void deleteTable(final byte [] tableName) throws IOException;
+
+  /**
+   * Used by the client to get the number of regions that have received the
+   * updated schema
+   *
+   * @param tableName
+   * @return Pair indicating the number of regions updated Pair.getFirst() is the
+   *         regions that are yet to be updated Pair.getSecond() is the total number
+   *         of regions of the table
+   * @throws IOException
+   */
+  public Pair<Integer, Integer> getAlterStatus(byte[] tableName)
+      throws IOException;
 
   /**
    * Adds a column to the specified table
@@ -165,10 +184,20 @@ public interface HMasterInterface extends VersionedProtocol {
    * found.
    * @param force If true, will force the assignment.
    * @throws IOException
+   * @deprecated The <code>force</code> is unused.Use {@link #assign(byte[])}
    */
   public void assign(final byte [] regionName, final boolean force)
   throws IOException;
 
+  /**
+   * Assign a region to a server chosen at random.
+   * 
+   * @param regionName
+   *          Region to assign. Will use existing RegionPlan if one found.
+   * @throws IOException
+   */
+  public void assign(final byte[] regionName) throws IOException;
+  
   /**
    * Unassign a region from current hosting regionserver.  Region will then be
    * assigned to a regionserver chosen at random.  Region could be reassigned
@@ -178,7 +207,7 @@ public interface HMasterInterface extends VersionedProtocol {
    * if one found.
    * @param force If true, force unassign (Will remove region from
    * regions-in-transition too if present as well as from assigned regions --
-   * radical!).
+   * radical!.If results in double assignment use hbck -fix to resolve.
    * @throws IOException
    */
   public void unassign(final byte [] regionName, final boolean force)
@@ -200,4 +229,33 @@ public interface HMasterInterface extends VersionedProtocol {
    * @return Previous balancer value
    */
   public boolean balanceSwitch(final boolean b);
+
+  /**
+   * Turn the load balancer on or off.
+   * It waits until current balance() call, if outstanding, to return.
+   * @param b If true, enable balancer. If false, disable balancer.
+   * @return Previous balancer value
+   */
+  public boolean synchronousBalanceSwitch(final boolean b);
+
+  /**
+   * Get array of all HTDs.
+   * @return array of HTableDescriptor
+   */
+  public HTableDescriptor[] getHTableDescriptors();
+
+  /**
+   * Get current HTD for a given tablename
+   * @param tableName
+   * @return HTableDescriptor for the table
+   */
+  //public HTableDescriptor getHTableDescriptor(final byte[] tableName);
+
+  /**
+   * Get array of HTDs for requested tables.
+   * @param tableNames
+   * @return array of HTableDescriptor
+   */
+  public HTableDescriptor[] getHTableDescriptors(List<String> tableNames);
+
 }

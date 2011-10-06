@@ -24,6 +24,8 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 
 import com.google.common.primitives.Longs;
 import org.apache.commons.logging.Log;
@@ -529,10 +531,8 @@ public class KeyValue implements Writable, HeapSize {
     KeyValue kv = (KeyValue)other;
     // Comparing bytes should be fine doing equals test.  Shouldn't have to
     // worry about special .META. comparators doing straight equals.
-    boolean result = Bytes.BYTES_RAWCOMPARATOR.compare(getBuffer(),
-        getKeyOffset(), getKeyLength(),
-      kv.getBuffer(), kv.getKeyOffset(), kv.getKeyLength()) == 0;
-    return result;
+    return Bytes.equals(getBuffer(), getKeyOffset(), getKeyLength(),
+      kv.getBuffer(), kv.getKeyOffset(), kv.getKeyLength());
   }
 
   public int hashCode() {
@@ -615,6 +615,24 @@ public class KeyValue implements Writable, HeapSize {
    * @param l Length of key.
    * @return Key as a String.
    */
+  /**
+   * Produces a string map for this key/value pair. Useful for programmatic use
+   * and manipulation of the data stored in an HLogKey, for example, printing 
+   * as JSON. Values are left out due to their tendency to be large. If needed, 
+   * they can be added manually.
+   * 
+   * @return the Map<String,?> containing data from this key
+   */
+  public Map<String, Object> toStringMap() {
+    Map<String, Object> stringMap = new HashMap<String, Object>();
+    stringMap.put("row", Bytes.toStringBinary(getRow()));
+    stringMap.put("family", Bytes.toStringBinary(getFamily()));
+    stringMap.put("qualifier", Bytes.toStringBinary(getQualifier()));
+    stringMap.put("timestamp", getTimestamp());
+    stringMap.put("vlen", getValueLength());
+    return stringMap;
+  }
+
   public static String keyToString(final byte [] b, final int o, final int l) {
     if (b == null) return "";
     int rowlength = Bytes.toShort(b, o);
@@ -828,8 +846,8 @@ public class KeyValue implements Writable, HeapSize {
    * @return True if this KeyValue has a LATEST_TIMESTAMP timestamp.
    */
   public boolean isLatestTimestamp() {
-    return  Bytes.compareTo(getBuffer(), getTimestampOffset(), Bytes.SIZEOF_LONG,
-      HConstants.LATEST_TIMESTAMP_BYTES, 0, Bytes.SIZEOF_LONG) == 0;
+    return Bytes.equals(getBuffer(), getTimestampOffset(), Bytes.SIZEOF_LONG,
+      HConstants.LATEST_TIMESTAMP_BYTES, 0, Bytes.SIZEOF_LONG);
   }
 
   /**
@@ -1089,8 +1107,8 @@ public class KeyValue implements Writable, HeapSize {
     if (this.length == 0 || this.bytes.length == 0) {
       return false;
     }
-    return Bytes.compareTo(family, offset, length,
-        this.bytes, getFamilyOffset(), getFamilyLength()) == 0;
+    return Bytes.equals(family, offset, length,
+        this.bytes, getFamilyOffset(), getFamilyLength());
   }
 
   public boolean matchingFamily(final KeyValue other) {
@@ -1107,8 +1125,8 @@ public class KeyValue implements Writable, HeapSize {
   }
 
   public boolean matchingQualifier(final byte [] qualifier, int offset, int length) {
-    return Bytes.compareTo(qualifier, offset, length,
-        this.bytes, getQualifierOffset(), getQualifierLength()) == 0;
+    return Bytes.equals(qualifier, offset, length,
+        this.bytes, getQualifierOffset(), getQualifierLength());
   }
 
   public boolean matchingQualifier(final KeyValue other) {
@@ -1121,8 +1139,8 @@ public class KeyValue implements Writable, HeapSize {
   }
 
   public boolean matchingRow(final byte[] row, int offset, int length) {
-    return Bytes.compareTo(row, offset, length,
-        this.bytes, getRowOffset(), getRowLength()) == 0;
+    return Bytes.equals(row, offset, length,
+        this.bytes, getRowOffset(), getRowLength());
   }
 
   public boolean matchingRow(KeyValue other) {
@@ -1139,7 +1157,7 @@ public class KeyValue implements Writable, HeapSize {
     int o = getFamilyOffset(rl);
     int fl = getFamilyLength(o);
     int l = fl + getQualifierLength(rl,fl);
-    return Bytes.compareTo(column, 0, column.length, this.bytes, o, l) == 0;
+    return Bytes.equals(column, 0, column.length, this.bytes, o, l);
   }
 
   /**
@@ -1153,8 +1171,7 @@ public class KeyValue implements Writable, HeapSize {
     int o = getFamilyOffset(rl);
     int fl = getFamilyLength(o);
     int ql = getQualifierLength(rl,fl);
-    if (Bytes.compareTo(family, 0, family.length, this.bytes, o, family.length)
-        != 0) {
+    if (!Bytes.equals(family, 0, family.length, this.bytes, o, family.length)) {
       return false;
     }
     if (qualifier == null || qualifier.length == 0) {
@@ -1163,8 +1180,8 @@ public class KeyValue implements Writable, HeapSize {
       }
       return false;
     }
-    return Bytes.compareTo(qualifier, 0, qualifier.length,
-        this.bytes, o + fl, ql) == 0;
+    return Bytes.equals(qualifier, 0, qualifier.length,
+        this.bytes, o + fl, ql);
   }
 
   /**
@@ -1294,12 +1311,16 @@ public class KeyValue implements Writable, HeapSize {
     return index;
   }
 
+  /**
+   * This function is only used in Meta key comparisons so its error message 
+   * is specific for meta key errors.
+   */
   static int getRequiredDelimiterInReverse(final byte [] b,
       final int offset, final int length, final int delimiter) {
     int index = getDelimiterInReverse(b, offset, length, delimiter);
     if (index < 0) {
-      throw new IllegalArgumentException("No " + delimiter + " in <" +
-        Bytes.toString(b) + ">" + ", length=" + length + ", offset=" + offset);
+      throw new IllegalArgumentException(".META. key must have two '" + (char)delimiter + "' "
+        + "delimiters and have the following format: '<table>,<key>,<etc>'");
     }
     return index;
   }
@@ -1459,7 +1480,7 @@ public class KeyValue implements Writable, HeapSize {
       return getRawComparator().compareRows(left, loffset, llength,
         right, roffset, rlength);
     }
-
+    
     public int compareColumns(final KeyValue left, final byte [] right,
         final int roffset, final int rlength, final int rfamilyoffset) {
       int offset = left.getFamilyOffset();
@@ -1505,7 +1526,8 @@ public class KeyValue implements Writable, HeapSize {
      * @return True if rows match.
      */
     public boolean matchingRows(final KeyValue left, final byte [] right) {
-      return compareRows(left, right) == 0;
+      return Bytes.equals(left.getBuffer(), left.getRowOffset(), left.getRowLength(),
+          right, 0, right.length);
     }
 
     /**
@@ -1530,18 +1552,15 @@ public class KeyValue implements Writable, HeapSize {
     public boolean matchingRows(final KeyValue left, final short lrowlength,
         final KeyValue right, final short rrowlength) {
       return lrowlength == rrowlength &&
-        compareRows(left, lrowlength, right, rrowlength) == 0;
+          Bytes.equals(left.getBuffer(), left.getRowOffset(), lrowlength,
+              right.getBuffer(), right.getRowOffset(), rrowlength);
     }
 
     public boolean matchingRows(final byte [] left, final int loffset,
         final int llength,
         final byte [] right, final int roffset, final int rlength) {
-      int compare = compareRows(left, loffset, llength,
+      return Bytes.equals(left, loffset, llength,
           right, roffset, rlength);
-      if (compare != 0) {
-        return false;
-      }
-      return true;
     }
 
     /**
@@ -1718,6 +1737,38 @@ public class KeyValue implements Writable, HeapSize {
     return new KeyValue(row, roffset, rlength, family,
         foffset, flength, qualifier, qoffset, qlength,
         HConstants.OLDEST_TIMESTAMP, Type.Minimum, null, 0, 0);
+  }
+
+  /**
+   * Similar to {@link #createLastOnRow(byte[], int, int, byte[], int, int,
+   * byte[], int, int)} but creates the last key on the row/column of this KV
+   * (the value part of the returned KV is always empty). Used in creating
+   * "fake keys" for the multi-column Bloom filter optimization to skip the
+   * row/column we already know is not in the file.
+   * @param kv the key-value pair to take row and column from
+   * @return the last key on the row/column of the given key-value pair
+   */
+  public KeyValue createLastOnRowCol() {
+    return new KeyValue(
+        bytes, getRowOffset(), getRowLength(),
+        bytes, getFamilyOffset(), getFamilyLength(),
+        bytes, getQualifierOffset(), getQualifierLength(),
+        HConstants.OLDEST_TIMESTAMP, Type.Minimum, null, 0, 0);
+  }
+
+  /**
+   * Creates the first KV with the row/family/qualifier of this KV and the
+   * given timestamp. Uses the "maximum" KV type that guarantees that the new
+   * KV is the lowest possible for this combination of row, family, qualifier,
+   * and timestamp. This KV's own timestamp is ignored. While this function
+   * copies the value from this KV, it is normally used on key-only KVs.
+   */
+  public KeyValue createFirstOnRowColTS(long ts) {
+    return new KeyValue(
+        bytes, getRowOffset(), getRowLength(),
+        bytes, getFamilyOffset(), getFamilyLength(),
+        bytes, getQualifierOffset(), getQualifierLength(),
+        ts, Type.Maximum, bytes, getValueOffset(), getValueLength());
   }
 
   /**

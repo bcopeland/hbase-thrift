@@ -19,6 +19,7 @@
  */
 package org.apache.hadoop.hbase.monitoring;
 
+import java.io.PrintWriter;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -70,12 +71,27 @@ public class TaskMonitor {
         stat.getClass().getClassLoader(),
         new Class<?>[] { MonitoredTask.class },
         new PassthroughInvocationHandler<MonitoredTask>(stat));
-
     TaskAndWeakRefPair pair = new TaskAndWeakRefPair(stat, proxy);
-    tasks.add(pair);
+    synchronized (this) {
+      tasks.add(pair);
+    }
     return proxy;
   }
-  
+
+  public MonitoredRPCHandler createRPCStatus(String description) {
+    MonitoredRPCHandler stat = new MonitoredRPCHandlerImpl();
+    stat.setDescription(description);
+    MonitoredRPCHandler proxy = (MonitoredRPCHandler) Proxy.newProxyInstance(
+        stat.getClass().getClassLoader(),
+        new Class<?>[] { MonitoredRPCHandler.class },
+        new PassthroughInvocationHandler<MonitoredRPCHandler>(stat));
+    TaskAndWeakRefPair pair = new TaskAndWeakRefPair(stat, proxy);
+    synchronized (this) {
+      tasks.add(pair);
+    }
+    return proxy;
+  }
+
   private synchronized void purgeExpiredTasks() {
     int size = 0;
     
@@ -106,11 +122,17 @@ public class TaskMonitor {
     }
   }
 
+  /**
+   * Produces a list containing copies of the current state of all non-expired 
+   * MonitoredTasks handled by this TaskMonitor.
+   * @return A complete list of MonitoredTasks.
+   */
   public synchronized List<MonitoredTask> getTasks() {
     purgeExpiredTasks();
     ArrayList<MonitoredTask> ret = Lists.newArrayListWithCapacity(tasks.size());
     for (TaskAndWeakRefPair pair : tasks) {
-      ret.add(pair.get());
+      MonitoredTask t = pair.get();
+      ret.add(t.clone());
     }
     return ret;
   }
@@ -120,6 +142,28 @@ public class TaskMonitor {
     return (cts > 0 && System.currentTimeMillis() - cts > EXPIRATION_TIME);
   }
   
+
+  public void dumpAsText(PrintWriter out) {
+    long now = System.currentTimeMillis();
+    
+    List<MonitoredTask> tasks = getTasks();
+    for (MonitoredTask task : tasks) {
+      out.println("Task: " + task.getDescription());
+      out.println("Status: " + task.getState() + ":" + task.getStatus());
+      long running = (now - task.getStartTime())/1000;
+      if (task.getCompletionTimestamp() != -1) {
+        long completed = (now - task.getCompletionTimestamp()) / 1000;
+        out.println("Completed " + completed + "s ago");
+        out.println("Ran for " +
+            (task.getCompletionTimestamp() - task.getStartTime())/1000
+            + "s");
+      } else {
+        out.println("Running for " + running + "s");
+      }
+      out.println();
+    }
+  }
+
   /**
    * This class encapsulates an object as well as a weak reference to a proxy
    * that passes through calls to that object. In art form:
@@ -158,7 +202,8 @@ public class TaskMonitor {
   }
   
   /**
-   * An InvocationHandler that simply passes through calls to the original object.
+   * An InvocationHandler that simply passes through calls to the original 
+   * object.
    */
   private static class PassthroughInvocationHandler<T> implements InvocationHandler {
     private T delegatee;

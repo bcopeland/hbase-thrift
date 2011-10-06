@@ -21,11 +21,13 @@ package org.apache.hadoop.hbase.mapreduce;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -56,8 +58,10 @@ import org.apache.hadoop.hbase.io.hfile.Compression;
 import org.apache.hadoop.hbase.io.hfile.Compression.Algorithm;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFile.Reader;
+import org.apache.hadoop.hbase.regionserver.TimeRangeTracker;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Threads;
+import org.apache.hadoop.hbase.util.Writables;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
@@ -165,7 +169,7 @@ public class TestHFileOutputFormat  {
    */
   @Test
   public void test_LATEST_TIMESTAMP_isReplaced()
-  throws IOException, InterruptedException {
+  throws Exception {
     Configuration conf = new Configuration(this.util.getConfiguration());
     RecordWriter<ImmutableBytesWritable, KeyValue> writer = null;
     TaskAttemptContext context = null;
@@ -174,8 +178,7 @@ public class TestHFileOutputFormat  {
     try {
       Job job = new Job(conf);
       FileOutputFormat.setOutputPath(job, dir);
-      context = new TaskAttemptContext(job.getConfiguration(),
-        new TaskAttemptID());
+      context = getTestTaskAttemptContext(job);
       HFileOutputFormat hof = new HFileOutputFormat();
       writer = hof.getRecordWriter(context);
       final byte [] b = Bytes.toBytes("b");
@@ -197,6 +200,100 @@ public class TestHFileOutputFormat  {
       original = kv.clone();
       writer.write(new ImmutableBytesWritable(), kv);
       assertTrue(original.equals(kv));
+    } finally {
+      if (writer != null && context != null) writer.close(context);
+      dir.getFileSystem(conf).delete(dir, true);
+    }
+  }
+
+  /**
+   * @return True if the available mapreduce is post-0.20.
+   */
+  private static boolean isPost020MapReduce() {
+    // Here is a coarse test for post 0.20 hadoop; TAC became an interface.
+    return TaskAttemptContext.class.isInterface();
+  }
+
+  private TaskAttemptContext getTestTaskAttemptContext(final Job job)
+  throws IOException, Exception {
+    TaskAttemptContext context;
+    if (isPost020MapReduce()) {
+      TaskAttemptID id =
+        TaskAttemptID.forName("attempt_200707121733_0001_m_000000_0");
+      Class<?> clazz =
+        Class.forName("org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl");
+      Constructor<?> c = clazz.
+          getConstructor(job.getConfiguration().getClass(), TaskAttemptID.class);
+      context = (TaskAttemptContext)c.newInstance(job.getConfiguration(), id);
+    } else {
+      context = org.apache.hadoop.hbase.mapreduce.hadoopbackport.InputSampler.
+        getTaskAttemptContext(job);
+    }
+    return context;
+  }
+
+  /*
+   * Test that {@link HFileOutputFormat} creates an HFile with TIMERANGE
+   * metadata used by time-restricted scans.
+   */
+  @Test
+  public void test_TIMERANGE() throws Exception { 
+    Configuration conf = new Configuration(this.util.getConfiguration());
+    RecordWriter<ImmutableBytesWritable, KeyValue> writer = null;
+    TaskAttemptContext context = null;
+    Path dir =
+      HBaseTestingUtility.getTestDir("test_TIMERANGE_present");
+    LOG.info("Timerange dir writing to dir: "+ dir);
+    try {
+      // build a record writer using HFileOutputFormat
+      Job job = new Job(conf);
+      FileOutputFormat.setOutputPath(job, dir);
+      context = getTestTaskAttemptContext(job);
+      HFileOutputFormat hof = new HFileOutputFormat();
+      writer = hof.getRecordWriter(context);
+
+      // Pass two key values with explicit times stamps
+      final byte [] b = Bytes.toBytes("b");
+
+      // value 1 with timestamp 2000
+      KeyValue kv = new KeyValue(b, b, b, 2000, b);
+      KeyValue original = kv.clone();
+      writer.write(new ImmutableBytesWritable(), kv);
+      assertEquals(original,kv);
+
+      // value 2 with timestamp 1000
+      kv = new KeyValue(b, b, b, 1000, b);
+      original = kv.clone();
+      writer.write(new ImmutableBytesWritable(), kv);
+      assertEquals(original, kv);
+
+      // verify that the file has the proper FileInfo.
+      writer.close(context);
+
+      // the generated file lives 3 directories down and is the only file,
+      // so we traverse the dirs to get to the file
+      // ./_temporary/_attempt__0000_r_000000_0/b/1979617994050536795
+      FileSystem fs = FileSystem.get(conf);
+      Path path = HFileOutputFormat.getOutputPath(job);
+      FileStatus[] sub1 = fs.listStatus(path);
+      FileStatus[] sub2 = fs.listStatus(sub1[0].getPath());
+      FileStatus[] sub3 = fs.listStatus(sub2[0].getPath());
+      FileStatus[] file = fs.listStatus(sub3[0].getPath());
+
+      // open as HFile Reader and pull out TIMERANGE FileInfo.
+      HFile.Reader rd = HFile.createReader(fs, file[0].getPath(), null, true,
+          false);
+      Map<byte[],byte[]> finfo = rd.loadFileInfo();
+      byte[] range = finfo.get("TIMERANGE".getBytes());
+      assertNotNull(range);
+
+      // unmarshall and check values.
+      TimeRangeTracker timeRangeTracker = new TimeRangeTracker();
+      Writables.copyWritable(range, timeRangeTracker);
+      LOG.info(timeRangeTracker.getMinimumTimestamp() +
+          "...." + timeRangeTracker.getMaximumTimestamp());
+      assertEquals(1000, timeRangeTracker.getMinimumTimestamp());
+      assertEquals(2000, timeRangeTracker.getMaximumTimestamp());
     } finally {
       if (writer != null && context != null) writer.close(context);
       dir.getFileSystem(conf).delete(dir, true);
@@ -454,8 +551,7 @@ public class TestHFileOutputFormat  {
    * from the column family descriptor
    */
   @Test
-  public void testColumnFamilyCompression()
-      throws IOException, InterruptedException {
+  public void testColumnFamilyCompression() throws Exception {
     Configuration conf = new Configuration(this.util.getConfiguration());
     RecordWriter<ImmutableBytesWritable, KeyValue> writer = null;
     TaskAttemptContext context = null;
@@ -480,12 +576,14 @@ public class TestHFileOutputFormat  {
 
     try {
       // partial map red setup to get an operational writer for testing
+      // We turn off the sequence file compression, because DefaultCodec
+      // pollutes the GZip codec pool with an incompatible compressor.
+      conf.set("io.seqfile.compression.type", "NONE");
       Job job = new Job(conf, "testLocalMRIncrementalLoad");
       setupRandomGeneratorMapper(job);
       HFileOutputFormat.configureIncrementalLoad(job, table);
       FileOutputFormat.setOutputPath(job, dir);
-      context = new TaskAttemptContext(job.getConfiguration(),
-          new TaskAttemptID());
+      context = getTestTaskAttemptContext(job);
       HFileOutputFormat hof = new HFileOutputFormat();
       writer = hof.getRecordWriter(context);
 
@@ -510,7 +608,8 @@ public class TestHFileOutputFormat  {
             // verify that the compression on this file matches the configured
             // compression
             Path dataFilePath = fileSystem.listStatus(f.getPath())[0].getPath();
-            Reader reader = new HFile.Reader(fileSystem, dataFilePath, null, false, true);
+            Reader reader = HFile.createReader(fileSystem, dataFilePath, null,
+                false, true);
             reader.loadFileInfo();
             assertEquals("Incorrect compression used for column family " + familyStr
                          + "(reader: " + reader + ")",

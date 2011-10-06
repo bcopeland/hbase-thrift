@@ -27,7 +27,7 @@ import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.client.RetriesExhaustedException;
 import org.apache.hadoop.io.Writable;
-import org.apache.hadoop.ipc.VersionedProtocol;
+import org.apache.hadoop.hbase.ipc.VersionedProtocol;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.ReflectionUtils;
@@ -114,7 +114,7 @@ public class HBaseRPC {
       // check for a per interface override
       Class<?> impl = conf.getClass(RPC_ENGINE_PROP+"."+protocol.getName(),
                                     defaultEngine);
-      LOG.info("Using "+impl.getName()+" for "+protocol.getName());
+      LOG.debug("Using "+impl.getName()+" for "+protocol.getName());
       engine = (RpcEngine) ReflectionUtils.newInstance(impl, conf);
       if (protocol.isInterface())
         PROXY_ENGINES.put(Proxy.getProxyClass(protocol.getClassLoader(),

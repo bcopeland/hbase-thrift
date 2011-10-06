@@ -26,7 +26,7 @@ import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericArray;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.ipc.HttpServer;
-import org.apache.avro.specific.SpecificResponder;
+import org.apache.avro.ipc.specific.SpecificResponder;
 import org.apache.avro.util.Utf8;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -35,6 +35,7 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.MasterNotRunningException;
 import org.apache.hadoop.hbase.TableExistsException;
+import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.avro.generated.AClusterStatus;
 import org.apache.hadoop.hbase.avro.generated.ADelete;
 import org.apache.hadoop.hbase.avro.generated.AFamilyDescriptor;
@@ -190,6 +191,8 @@ public class AvroServer {
     public ATableDescriptor describeTable(ByteBuffer table) throws AIOError {
       try {
 	return AvroUtil.htdToATD(admin.getTableDescriptor(Bytes.toBytes(table)));
+      } catch (TableNotFoundException e) {
+        return null;
       } catch (IOException e) {
         AIOError ioe = new AIOError();
         ioe.message = new Utf8(e.getMessage());

@@ -105,7 +105,7 @@ public class TestDistributedLogSplitting {
     cluster.shutdown();
   }
 
-  @Test
+  @Test (timeout=300000)
   public void testThreeRSAbort() throws Exception {
     LOG.info("testThreeRSAbort");
     final int NUM_REGIONS_TO_CREATE = 40;
@@ -146,7 +146,7 @@ public class TestDistributedLogSplitting {
         TEST_UTIL.countRows(ht));
   }
 
-  @Test(expected=OrphanHLogAfterSplitException.class)
+  @Test(expected=OrphanHLogAfterSplitException.class, timeout=300000)
   public void testOrphanLogCreation() throws Exception {
     LOG.info("testOrphanLogCreation");
     startCluster(NUM_RS);
@@ -191,7 +191,7 @@ public class TestDistributedLogSplitting {
     }
   }
 
-  @Test
+  @Test (timeout=300000)
   public void testRecoveredEdits() throws Exception {
     LOG.info("testRecoveredEdits");
     startCluster(NUM_RS);
@@ -242,7 +242,7 @@ public class TestDistributedLogSplitting {
     assertEquals(NUM_LOG_LINES, count);
   }
 
-  @Test
+  @Test (timeout=300000)
   public void testWorkerAbort() throws Exception {
     LOG.info("testWorkerAbort");
     startCluster(1);
@@ -301,7 +301,7 @@ public class TestDistributedLogSplitting {
     HTable ht = TEST_UTIL.createTable(table, family);
     int numRegions = TEST_UTIL.createMultiRegions(conf, ht, family, nrs);
     assertEquals(nrs, numRegions);
-    LOG.info("Waiting for no more RIT\n");
+      LOG.info("Waiting for no more RIT\n");
     blockUntilNoRIT(zkw, master);
     // disable-enable cycle to get rid of table's dead regions left behind
     // by createMultiRegions
@@ -353,6 +353,7 @@ public class TestDistributedLogSplitting {
       int num_edits, int edit_size) throws IOException {
 
     byte[] table = Bytes.toBytes(tname);
+    HTableDescriptor htd = new HTableDescriptor(tname);
     byte[] value = new byte[edit_size];
     for (int i = 0; i < edit_size; i++) {
       value[i] = (byte)('a' + (i % 26));
@@ -369,7 +370,7 @@ public class TestDistributedLogSplitting {
           System.currentTimeMillis(), value));
       // LOG.info("Region " + i + ": " + e);
       j++;
-      log.append(hris.get(j % n), table, e, System.currentTimeMillis());
+      log.append(hris.get(j % n), table, e, System.currentTimeMillis(), htd);
       counts[j % n] += 1;
       // if ((i % 8096) == 0) {
         // log.sync();
@@ -412,7 +413,8 @@ public class TestDistributedLogSplitting {
     }
   }
 
-  private NavigableSet<String> getAllOnlineRegions(MiniHBaseCluster cluster) {
+  private NavigableSet<String> getAllOnlineRegions(MiniHBaseCluster cluster)
+      throws IOException {
     NavigableSet<String> online = new TreeSet<String>();
     for (RegionServerThread rst : cluster.getLiveRegionServerThreads()) {
       for (HRegionInfo region : rst.getRegionServer().getOnlineRegions()) {

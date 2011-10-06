@@ -110,7 +110,6 @@ extends InputFormat<ImmutableBytesWritable, Result> {
     sc.setStopRow(tSplit.getEndRow());
     trr.setScan(sc);
     trr.setHTable(table);
-    trr.init();
     return trr;
   }
 
@@ -141,7 +140,7 @@ extends InputFormat<ImmutableBytesWritable, Result> {
         continue;
       }
       String regionLocation = table.getRegionLocation(keys.getFirst()[i]).
-        getServerAddress().getHostname();
+        getHostname();
       byte[] startRow = scan.getStartRow();
       byte[] stopRow = scan.getStopRow();
       // determine if the given start an stop key fall into the region

@@ -19,22 +19,32 @@
  */
 package org.apache.hadoop.hbase.io.hfile;
 
+import java.io.IOException;
 import java.lang.ref.WeakReference;
-import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.io.HeapSize;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
+import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.util.StringUtils;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -251,7 +261,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
    * @param buf block buffer
    * @param inMemory if block is in-memory
    */
-  public void cacheBlock(String blockName, ByteBuffer buf, boolean inMemory) {
+  public void cacheBlock(String blockName, Cacheable buf, boolean inMemory) {
     CachedBlock cb = map.get(blockName);
     if(cb != null) {
       throw new RuntimeException("Cached an already cached block");
@@ -275,7 +285,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
    * @param blockName block name
    * @param buf block buffer
    */
-  public void cacheBlock(String blockName, ByteBuffer buf) {
+  public void cacheBlock(String blockName, Cacheable buf) {
     cacheBlock(blockName, buf, false);
   }
 
@@ -284,7 +294,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
    * @param blockName block name
    * @return buffer of specified block name, or null if not in cache
    */
-  public ByteBuffer getBlock(String blockName, boolean caching) {
+  public Cacheable getBlock(String blockName, boolean caching) {
     CachedBlock cb = map.get(blockName);
     if(cb == null) {
       stats.miss(caching);
@@ -302,6 +312,31 @@ public class LruBlockCache implements BlockCache, HeapSize {
     if (cb == null) return false;
     evictBlock(cb);
     return true;
+  }
+
+  /**
+   * Evicts all blocks whose name starts with the given prefix. This is an
+   * expensive operation implemented as a linear-time search through all blocks
+   * in the cache. Ideally this should be a search in a log-access-time map.
+   *
+   * <p>
+   * This is used for evict-on-close to remove all blocks of a specific HFile.
+   * The prefix would be the HFile/StoreFile name (a UUID) followed by an
+   * underscore, because HFile v2 block names in cache are of the form
+   * "&lt;storeFileUUID&gt;_&lt;blockOffset&gt;".
+   *
+   * @return the number of blocks evicted
+   */
+  @Override
+  public int evictBlocksByPrefix(String prefix) {
+    int numEvicted = 0;
+    for (String key : map.keySet()) {
+      if (key.startsWith(prefix)) {
+        if (evictBlock(key))
+          ++numEvicted;
+      }
+    }
+    return numEvicted;
   }
 
   protected long evictBlock(CachedBlock block) {
@@ -570,11 +605,11 @@ public class LruBlockCache implements BlockCache, HeapSize {
         "accesses=" + stats.getRequestCount() + ", " +
         "hits=" + stats.getHitCount() + ", " +
         "hitRatio=" +
-          (stats.getHitCount() == 0 ? "0" : (StringUtils.formatPercent(stats.getHitRatio(), 2) + "%, ")) +
+          (stats.getHitCount() == 0 ? "0" : (StringUtils.formatPercent(stats.getHitRatio(), 2)+ ", ")) +
         "cachingAccesses=" + stats.getRequestCachingCount() + ", " +
         "cachingHits=" + stats.getHitCachingCount() + ", " +
         "cachingHitsRatio=" +
-          (stats.getHitCachingCount() == 0 ? "0" : (StringUtils.formatPercent(stats.getHitCachingRatio(), 2) + "%, ")) +
+          (stats.getHitCachingCount() == 0 ? "0" : (StringUtils.formatPercent(stats.getHitCachingRatio(), 2)+ ", ")) +
         "evictions=" + stats.getEvictionCount() + ", " +
         "evicted=" + stats.getEvictedCount() + ", " +
         "evictedPerRun=" + stats.evictedPerEviction());
@@ -589,100 +624,7 @@ public class LruBlockCache implements BlockCache, HeapSize {
   public CacheStats getStats() {
     return this.stats;
   }
-
-  public static class CacheStats {
-    /** The number of getBlock requests that were cache hits */
-    private final AtomicLong hitCount = new AtomicLong(0);
-    /**
-     * The number of getBlock requests that were cache hits, but only from
-     * requests that were set to use the block cache.  This is because all reads
-     * attempt to read from the block cache even if they will not put new blocks
-     * into the block cache.  See HBASE-2253 for more information.
-     */
-    private final AtomicLong hitCachingCount = new AtomicLong(0);
-    /** The number of getBlock requests that were cache misses */
-    private final AtomicLong missCount = new AtomicLong(0);
-    /**
-     * The number of getBlock requests that were cache misses, but only from
-     * requests that were set to use the block cache.
-     */
-    private final AtomicLong missCachingCount = new AtomicLong(0);
-    /** The number of times an eviction has occurred */
-    private final AtomicLong evictionCount = new AtomicLong(0);
-    /** The total number of blocks that have been evicted */
-    private final AtomicLong evictedCount = new AtomicLong(0);
-
-    public void miss(boolean caching) {
-      missCount.incrementAndGet();
-      if (caching) missCachingCount.incrementAndGet();
-    }
-
-    public void hit(boolean caching) {
-      hitCount.incrementAndGet();
-      if (caching) hitCachingCount.incrementAndGet();
-    }
-
-    public void evict() {
-      evictionCount.incrementAndGet();
-    }
-
-    public void evicted() {
-      evictedCount.incrementAndGet();
-    }
-
-    public long getRequestCount() {
-      return getHitCount() + getMissCount();
-    }
-
-    public long getRequestCachingCount() {
-      return getHitCachingCount() + getMissCachingCount();
-    }
-
-    public long getMissCount() {
-      return missCount.get();
-    }
-
-    public long getMissCachingCount() {
-      return missCachingCount.get();
-    }
-
-    public long getHitCount() {
-      return hitCount.get();
-    }
-
-    public long getHitCachingCount() {
-      return hitCachingCount.get();
-    }
-
-    public long getEvictionCount() {
-      return evictionCount.get();
-    }
-
-    public long getEvictedCount() {
-      return evictedCount.get();
-    }
-
-    public double getHitRatio() {
-      return ((float)getHitCount()/(float)getRequestCount());
-    }
-
-    public double getHitCachingRatio() {
-      return ((float)getHitCachingCount()/(float)getRequestCachingCount());
-    }
-
-    public double getMissRatio() {
-      return ((float)getMissCount()/(float)getRequestCount());
-    }
-
-    public double getMissCachingRatio() {
-      return ((float)getMissCachingCount()/(float)getRequestCachingCount());
-    }
-
-    public double evictedPerEviction() {
-      return ((float)getEvictedCount()/(float)getEvictionCount());
-    }
-  }
-
+  
   public final static long CACHE_FIXED_OVERHEAD = ClassSize.align(
       (3 * Bytes.SIZEOF_LONG) + (8 * ClassSize.REFERENCE) +
       (5 * Bytes.SIZEOF_FLOAT) + Bytes.SIZEOF_BOOLEAN
@@ -701,6 +643,46 @@ public class LruBlockCache implements BlockCache, HeapSize {
         (concurrency * ClassSize.CONCURRENT_HASHMAP_SEGMENT);
   }
 
+  @Override
+  public List<BlockCacheColumnFamilySummary> getBlockCacheColumnFamilySummaries(Configuration conf) throws IOException {
+   
+    Map<String, Path> sfMap = FSUtils.getTableStoreFilePathMap(
+        FileSystem.get(conf),
+        FSUtils.getRootDir(conf));
+        
+    // quirky, but it's a compound key and this is a shortcut taken instead of 
+    // creating a class that would represent only a key.
+    Map<BlockCacheColumnFamilySummary, BlockCacheColumnFamilySummary> bcs = 
+      new HashMap<BlockCacheColumnFamilySummary, BlockCacheColumnFamilySummary>();
+
+    final String pattern = "\\" + HFile.CACHE_KEY_SEPARATOR;
+    
+    for (CachedBlock cb : map.values()) {
+      // split name and get the first part (e.g., "8351478435190657655_0")
+      // see HFile.getBlockCacheKey for structure of block cache key.
+      String s[] = cb.getName().split(pattern);
+      if (s.length > 0) {
+        String sf = s[0];
+        Path path = sfMap.get(sf);
+        if ( path != null) {
+          BlockCacheColumnFamilySummary lookup = 
+            BlockCacheColumnFamilySummary.createFromStoreFilePath(path);
+          BlockCacheColumnFamilySummary bcse = bcs.get(lookup);
+          if (bcse == null) {
+            bcse = BlockCacheColumnFamilySummary.create(lookup);
+            bcs.put(lookup,bcse);
+          }
+          bcse.incrementBlocks();
+          bcse.incrementHeapSize(cb.heapSize());
+        }
+      }
+    }
+    List<BlockCacheColumnFamilySummary> list = 
+        new ArrayList<BlockCacheColumnFamilySummary>(bcs.values());
+    Collections.sort( list );  
+    return list;
+  }
+    
   // Simple calculators of sizes given factors and maxSize
 
   private long acceptableSize() {

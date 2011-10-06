@@ -33,6 +33,9 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ArrayList;
+
+import com.google.common.base.Preconditions;
 
 /**
  * This filter is used to filter cells based on value. It takes a {@link CompareFilter.CompareOp}
@@ -82,8 +85,11 @@ public class SingleColumnValueFilter extends FilterBase {
   /**
    * Constructor for binary compare of the value of a single column.  If the
    * column is found and the condition passes, all columns of the row will be
-   * emitted.  If the column is not found or the condition fails, the row will
-   * not be emitted.
+   * emitted.  If the condition fails, the row will not be emitted.
+   * <p>
+   * Use the filterIfColumnMissing flag to set whether the rest of the columns
+   * in a row will be emitted if the specified column to check is not found in
+   * the row.
    *
    * @param family name of column family
    * @param qualifier name of column qualifier
@@ -242,6 +248,36 @@ public class SingleColumnValueFilter extends FilterBase {
    */
   public void setLatestVersionOnly(boolean latestVersionOnly) {
     this.latestVersionOnly = latestVersionOnly;
+  }
+
+  public static Filter createFilterFromArguments(ArrayList<byte []> filterArguments) {
+    Preconditions.checkArgument(filterArguments.size() == 4 || filterArguments.size() == 6,
+                                "Expected 4 or 6 but got: %s", filterArguments.size());
+    byte [] family = ParseFilter.removeQuotesFromByteArray(filterArguments.get(0));
+    byte [] qualifier = ParseFilter.removeQuotesFromByteArray(filterArguments.get(1));
+    CompareOp compareOp = ParseFilter.createCompareOp(filterArguments.get(2));
+    WritableByteArrayComparable comparator = ParseFilter.createComparator(
+      ParseFilter.removeQuotesFromByteArray(filterArguments.get(3)));
+
+    if (comparator instanceof RegexStringComparator ||
+        comparator instanceof SubstringComparator) {
+      if (compareOp != CompareOp.EQUAL &&
+          compareOp != CompareOp.NOT_EQUAL) {
+        throw new IllegalArgumentException ("A regexstring comparator and substring comparator " +
+                                            "can only be used with EQUAL and NOT_EQUAL");
+      }
+    }
+
+    SingleColumnValueFilter filter = new SingleColumnValueFilter(family, qualifier,
+                                                                 compareOp, comparator);
+
+    if (filterArguments.size() == 6) {
+      boolean filterIfMissing = ParseFilter.convertByteArrayToBoolean(filterArguments.get(4));
+      boolean latestVersionOnly = ParseFilter.convertByteArrayToBoolean(filterArguments.get(5));
+      filter.setFilterIfMissing(filterIfMissing);
+      filter.setLatestVersionOnly(latestVersionOnly);
+    }
+    return filter;
   }
 
   public void readFields(final DataInput in) throws IOException {

@@ -36,8 +36,6 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.catalog.CatalogTracker;
 import org.apache.hadoop.hbase.catalog.MetaReader;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HConnection;
-import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.junit.Test;
@@ -96,7 +94,9 @@ public class TestMergeTable {
     byte [] row_70001 = Bytes.toBytes("row_70001");
     byte [] row_80001 = Bytes.toBytes("row_80001");
 
-    // Create regions and populate them at same time.
+    // Create regions and populate them at same time.  Create the tabledir
+    // for them first.
+    FSUtils.createTableDescriptor(fs, rootdir, desc);
     HRegion [] regions = {
       createRegion(desc, null, row_70001, 1, 70000, rootdir),
       createRegion(desc, row_70001, row_80001, 70001, 10000, rootdir),
@@ -136,8 +136,8 @@ public class TestMergeTable {
   private HRegion createRegion(final HTableDescriptor desc,
       byte [] startKey, byte [] endKey, int firstRow, int nrows, Path rootdir)
   throws IOException {
-    HRegionInfo hri = new HRegionInfo(desc, startKey, endKey);
-    HRegion region = HRegion.createHRegion(hri, rootdir, UTIL.getConfiguration());
+    HRegionInfo hri = new HRegionInfo(desc.getName(), startKey, endKey);
+    HRegion region = HRegion.createHRegion(hri, rootdir, UTIL.getConfiguration(), desc);
     LOG.info("Created region " + region.getRegionNameAsString());
     for(int i = firstRow; i < firstRow + nrows; i++) {
       Put put = new Put(Bytes.toBytes("row_" + String.format("%1$05d", i)));
@@ -156,10 +156,11 @@ public class TestMergeTable {
   protected void setupROOTAndMeta(Path rootdir, final HRegion [] regions)
   throws IOException {
     HRegion root =
-      HRegion.createHRegion(HRegionInfo.ROOT_REGIONINFO, rootdir, UTIL.getConfiguration());
+      HRegion.createHRegion(HRegionInfo.ROOT_REGIONINFO, rootdir,
+          UTIL.getConfiguration(), HTableDescriptor.ROOT_TABLEDESC);
     HRegion meta =
       HRegion.createHRegion(HRegionInfo.FIRST_META_REGIONINFO, rootdir,
-      UTIL.getConfiguration());
+      UTIL.getConfiguration(), HTableDescriptor.META_TABLEDESC);
     HRegion.addRegionToMETA(root, meta);
     for (HRegion r: regions) {
       HRegion.addRegionToMETA(meta, r);

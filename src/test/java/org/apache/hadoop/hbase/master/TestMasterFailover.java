@@ -23,6 +23,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -31,25 +32,25 @@ import java.util.TreeSet;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.Abortable;
-import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HBaseTestingUtility;
-import org.apache.hadoop.hbase.HColumnDescriptor;
-import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.MiniHBaseCluster;
-import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.executor.RegionTransitionData;
 import org.apache.hadoop.hbase.executor.EventHandler.EventType;
 import org.apache.hadoop.hbase.master.AssignmentManager.RegionState;
-import org.apache.hadoop.hbase.master.LoadBalancer.RegionPlan;
+import org.apache.hadoop.hbase.master.RegionPlan;
+import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.JVMClusterUtil;
 import org.apache.hadoop.hbase.util.JVMClusterUtil.MasterThread;
+import org.apache.hadoop.hbase.util.JVMClusterUtil.RegionServerThread;
 import org.apache.hadoop.hbase.zookeeper.ZKAssign;
 import org.apache.hadoop.hbase.zookeeper.ZKTable;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.KeeperException.NodeExistsException;
 import org.junit.Test;
 
 public class TestMasterFailover {
@@ -63,7 +64,7 @@ public class TestMasterFailover {
    * the cluster.
    * @throws Exception
    */
-  @Test (timeout=180000)
+  @Test (timeout=240000)
   public void testSimpleMasterFailover() throws Exception {
 
     final int NUM_MASTERS = 3;
@@ -130,6 +131,83 @@ public class TestMasterFailover {
     // Stop the cluster
     TEST_UTIL.shutdownMiniCluster();
   }
+  
+  @Test
+  public void testShouldCheckMasterFailOverWhenMETAIsInOpenedState()
+      throws Exception {
+    final int NUM_MASTERS = 1;
+    final int NUM_RS = 2;
+
+    Configuration conf = HBaseConfiguration.create();
+    conf.setInt("hbase.master.assignment.timeoutmonitor.period", 2000);
+    conf.setInt("hbase.master.assignment.timeoutmonitor.timeout", 8000);
+    // Start the cluster
+    HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility(conf);
+    TEST_UTIL.startMiniCluster(NUM_MASTERS, NUM_RS);
+    MiniHBaseCluster cluster = TEST_UTIL.getHBaseCluster();
+
+    // get all the master threads
+    List<MasterThread> masterThreads = cluster.getMasterThreads();
+
+    // wait for each to come online
+    for (MasterThread mt : masterThreads) {
+      assertTrue(mt.isAlive());
+    }
+
+    // verify only one is the active master and we have right number
+    int numActive = 0;
+    ServerName activeName = null;
+    for (int i = 0; i < masterThreads.size(); i++) {
+      if (masterThreads.get(i).getMaster().isActiveMaster()) {
+        numActive++;
+        activeName = masterThreads.get(i).getMaster().getServerName();
+      }
+    }
+    assertEquals(1, numActive);
+    assertEquals(NUM_MASTERS, masterThreads.size());
+
+    // verify still one active master and it's the same
+    for (int i = 0; i < masterThreads.size(); i++) {
+      if (masterThreads.get(i).getMaster().isActiveMaster()) {
+        assertTrue(activeName.equals(masterThreads.get(i).getMaster()
+            .getServerName()));
+      }
+    }
+    assertEquals(1, numActive);
+    assertEquals(1, masterThreads.size());
+
+    List<RegionServerThread> regionServerThreads = cluster
+        .getRegionServerThreads();
+    int count = -1;
+    HRegion metaRegion = null;
+    for (RegionServerThread regionServerThread : regionServerThreads) {
+      HRegionServer regionServer = regionServerThread.getRegionServer();
+      metaRegion = regionServer
+          .getOnlineRegion(HRegionInfo.FIRST_META_REGIONINFO.getRegionName());
+      count++;
+      regionServer.abort("");
+      if (null != metaRegion) {
+        break;
+      }
+    }
+    HRegionServer regionServer = cluster.getRegionServer(count);
+
+    cluster.shutdown();
+    // Create a ZKW to use in the test
+    ZooKeeperWatcher zkw = 
+      HBaseTestingUtility.createAndForceNodeToOpenedState(TEST_UTIL, 
+          metaRegion, regionServer);
+
+    TEST_UTIL.startMiniHBaseCluster(1, 1);
+
+    // Failover should be completed, now wait for no RIT
+    log("Waiting for no more RIT");
+    ZKAssign.blockUntilNoRIT(zkw);
+
+    // Stop the cluster
+    TEST_UTIL.shutdownMiniCluster();
+  }
+
 
   /**
    * Complex test of master failover that tests as many permutations of the
@@ -231,10 +309,18 @@ public class TestMasterFailover {
     // Create a ZKW to use in the test
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(TEST_UTIL.getConfiguration(),
       "unittest", new Abortable() {
+    	boolean aborted = false;
         @Override
         public void abort(String why, Throwable e) {
+          this.aborted = true;
           throw new RuntimeException("Fatal ZK error, why=" + why, e);
         }
+        
+        @Override
+        public boolean isAborted() {
+          return this.aborted;
+        }
+        
     });
 
     // get all the master threads
@@ -262,12 +348,26 @@ public class TestMasterFailover {
     byte [] enabledTable = Bytes.toBytes("enabledTable");
     HTableDescriptor htdEnabled = new HTableDescriptor(enabledTable);
     htdEnabled.addFamily(new HColumnDescriptor(FAMILY));
+
+    FileSystem filesystem = FileSystem.get(conf);
+    Path rootdir = filesystem.makeQualified(
+        new Path(conf.get(HConstants.HBASE_DIR)));
+    // Write the .tableinfo
+    FSUtils.createTableDescriptor(filesystem, rootdir, htdEnabled);
+
+    HRegionInfo hriEnabled = new HRegionInfo(htdEnabled.getName(), null, null);
+    HRegion.createHRegion(hriEnabled, rootdir, conf, htdEnabled);
+
     List<HRegionInfo> enabledRegions = TEST_UTIL.createMultiRegionsInMeta(
         TEST_UTIL.getConfiguration(), htdEnabled, SPLIT_KEYS);
 
     byte [] disabledTable = Bytes.toBytes("disabledTable");
     HTableDescriptor htdDisabled = new HTableDescriptor(disabledTable);
     htdDisabled.addFamily(new HColumnDescriptor(FAMILY));
+    // Write the .tableinfo
+    FSUtils.createTableDescriptor(filesystem, rootdir, htdDisabled);
+    HRegionInfo hriDisabled = new HRegionInfo(htdDisabled.getName(), null, null);
+    HRegion.createHRegion(hriDisabled, rootdir, conf, htdDisabled);
     List<HRegionInfo> disabledRegions = TEST_UTIL.createMultiRegionsInMeta(
         TEST_UTIL.getConfiguration(), htdDisabled, SPLIT_KEYS);
 
@@ -534,11 +634,18 @@ public class TestMasterFailover {
     // Create a ZKW to use in the test
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(TEST_UTIL.getConfiguration(),
         "unittest", new Abortable() {
+          
           @Override
           public void abort(String why, Throwable e) {
             LOG.error("Fatal ZK Error: " + why, e);
             org.junit.Assert.assertFalse("Fatal ZK error", true);
           }
+          
+          @Override
+          public boolean isAborted() {
+            return false;
+          }
+          
     });
 
     // get all the master threads
@@ -566,12 +673,26 @@ public class TestMasterFailover {
     byte [] enabledTable = Bytes.toBytes("enabledTable");
     HTableDescriptor htdEnabled = new HTableDescriptor(enabledTable);
     htdEnabled.addFamily(new HColumnDescriptor(FAMILY));
+    FileSystem filesystem = FileSystem.get(conf);
+    Path rootdir = filesystem.makeQualified(
+           new Path(conf.get(HConstants.HBASE_DIR)));
+    // Write the .tableinfo
+    FSUtils.createTableDescriptor(filesystem, rootdir, htdEnabled);
+    HRegionInfo hriEnabled = new HRegionInfo(htdEnabled.getName(),
+        null, null);
+    HRegion.createHRegion(hriEnabled, rootdir, conf, htdEnabled);
+
     List<HRegionInfo> enabledRegions = TEST_UTIL.createMultiRegionsInMeta(
         TEST_UTIL.getConfiguration(), htdEnabled, SPLIT_KEYS);
 
     byte [] disabledTable = Bytes.toBytes("disabledTable");
     HTableDescriptor htdDisabled = new HTableDescriptor(disabledTable);
     htdDisabled.addFamily(new HColumnDescriptor(FAMILY));
+    // Write the .tableinfo
+    FSUtils.createTableDescriptor(filesystem, rootdir, htdDisabled);
+    HRegionInfo hriDisabled = new HRegionInfo(htdDisabled.getName(), null, null);
+    HRegion.createHRegion(hriDisabled, rootdir, conf, htdDisabled);
+
     List<HRegionInfo> disabledRegions = TEST_UTIL.createMultiRegionsInMeta(
         TEST_UTIL.getConfiguration(), htdDisabled, SPLIT_KEYS);
 
@@ -795,7 +916,7 @@ public class TestMasterFailover {
     log("Starting up a new master");
     master = cluster.startMaster().getMaster();
     log("Waiting for master to be ready");
-    cluster.waitForActiveAndReadyMaster();
+    assertTrue(cluster.waitForActiveAndReadyMaster());
     log("Master is ready");
 
     // Let's add some weird states to master in-memory state
@@ -855,8 +976,12 @@ public class TestMasterFailover {
     // Grab all the regions that are online across RSs
     Set<HRegionInfo> onlineRegions = new TreeSet<HRegionInfo>();
     for (JVMClusterUtil.RegionServerThread rst :
-      cluster.getRegionServerThreads()) {
-      onlineRegions.addAll(rst.getRegionServer().getOnlineRegions());
+        cluster.getRegionServerThreads()) {
+      try {
+        onlineRegions.addAll(rst.getRegionServer().getOnlineRegions());
+      } catch (org.apache.hadoop.hbase.regionserver.RegionServerStoppedException e) {
+        LOG.info("Got RegionServerStoppedException", e);
+      }
     }
 
     // Now, everything that should be online should be online
