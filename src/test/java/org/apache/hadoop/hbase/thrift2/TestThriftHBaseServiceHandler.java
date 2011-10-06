@@ -59,7 +59,7 @@ import com.google.common.base.Equivalence;
  * Unit testing for ThriftServer.HBaseHandler, a part of the
  * org.apache.hadoop.hbase.thrift2 package.
  */
-public class TestThriftServer {
+public class TestThriftHBaseServiceHandler {
   private static final HBaseTestingUtility UTIL = new HBaseTestingUtility();
 
   // Static names for tables, columns, rows, and values
