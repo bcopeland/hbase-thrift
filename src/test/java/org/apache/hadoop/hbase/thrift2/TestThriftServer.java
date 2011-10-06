@@ -40,10 +40,12 @@ import org.apache.hadoop.hbase.thrift2.generated.TColumnIncrement;
 import org.apache.hadoop.hbase.thrift2.generated.TColumnValue;
 import org.apache.hadoop.hbase.thrift2.generated.TDelete;
 import org.apache.hadoop.hbase.thrift2.generated.TGet;
+import org.apache.hadoop.hbase.thrift2.generated.TIOError;
 import org.apache.hadoop.hbase.thrift2.generated.TIncrement;
 import org.apache.hadoop.hbase.thrift2.generated.TPut;
 import org.apache.hadoop.hbase.thrift2.generated.TResult;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.thrift.TException;
 import org.jruby.compiler.ir.operands.Array;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -133,42 +135,25 @@ public class TestThriftServer {
 
   }
 
-  /**
-   * Tests for creating, enabling, disabling, and deleting tables. Also
-   * tests that creating a table with an invalid column name yields an
-   * IllegalArgument exception.
-   * 
-   * @throws Exception
-   * @Test
-   *       public void doTestTableCreateDrop() throws Exception {
-   *       ThriftHBaseServiceHandler handler = new ThriftHBaseServiceHandler();
-   *       // Create/enable/disable/delete tables, ensure methods act correctly
-   *       /*
-   *       assertTrue(handler.isMasterRunning());
-   *       assertEquals(handler.getTableNames().size(), 0);
-   *       handler.createTable(tableAname, getColumnDescriptors());
-   *       assertEquals(handler.getTableNames().size(), 1);
-   *       assertEquals(handler.getColumnDescriptors(tableAname).size(), 2);
-   *       assertTrue(handler.isTableEnabled(tableAname));
-   *       handler.createTable(tableBname, new ArrayList<ColumnDescriptor>());
-   *       assertEquals(handler.getTableNames().size(), 2);
-   *       handler.disableTable(tableBname);
-   *       assertFalse(handler.isTableEnabled(tableBname));
-   *       handler.deleteTable(tableBname);
-   *       assertEquals(handler.getTableNames().size(), 1);
-   *       handler.disableTable(tableAname);
-   *       assertFalse(handler.isTableEnabled(tableAname));
-   *       handler.enableTable(tableAname);
-   *       assertTrue(handler.isTableEnabled(tableAname));
-   *       handler.disableTable(tableAname);
-   *       handler.deleteTable(tableAname);
-   *       }
-   *       /**
-   *       Tests adding a series of Mutations and BatchMutations, including a
-   *       delete mutation. Also tests data retrieval, and getting back multiple
-   *       versions.
-   * @throws Exception
-   */
+  @Test
+  public void testExists() throws TIOError, TException {
+    ThriftHBaseServiceHandler handler = new ThriftHBaseServiceHandler();
+    byte[] rowName = "testExists".getBytes();
+    ByteBuffer table = ByteBuffer.wrap(tableAname);
+
+    TGet get = new TGet(ByteBuffer.wrap(rowName));
+    assertFalse(handler.exists(table, get));
+
+    List<TColumnValue> columnValues = new ArrayList<TColumnValue>();
+    columnValues.add(new TColumnValue(ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname), ByteBuffer.wrap(valueAname)));
+    columnValues.add(new TColumnValue(ByteBuffer.wrap(familyBname), ByteBuffer.wrap(qualifierBname), ByteBuffer.wrap(valueBname)));
+    TPut put = new TPut(ByteBuffer.wrap(rowName), columnValues);
+    put.setColumnValues(columnValues);
+
+    handler.put(table, put);
+
+    assertTrue(handler.exists(table, get));
+  }
 
   @Test
   public void testPutGet() throws Exception {
@@ -289,7 +274,7 @@ public class TestThriftServer {
 
     assertTrue(handler.checkAndPut(table, ByteBuffer.wrap(rowName), ByteBuffer.wrap(familyAname), ByteBuffer.wrap(qualifierAname),
         ByteBuffer.wrap(valueAname), putB));
-    
+
     result = handler.get(table, get);
     assertArrayEquals(rowName, result.getRow());
     List<TColumnValue> returnedColumnValues = result.getColumnValues();
