@@ -159,7 +159,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
                              ByteBuffer value, TPut put) throws TIOError, TException {
     HTableInterface htable = getTable(table.array());
     try {
-      return htable.checkAndPut(row.array(), family.array(), qualifier.array(), value.array(), putFromThrift(put));
+      return htable.checkAndPut(row.array(), family.array(), qualifier.array(), (value == null) ? null : value.array(), putFromThrift(put));
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
