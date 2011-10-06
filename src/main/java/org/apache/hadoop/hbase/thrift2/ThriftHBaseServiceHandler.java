@@ -45,9 +45,9 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     return htablePool.getTable(tableName);
   }
 
-  private void putTable(HTableInterface table) throws TIOError {
+  private void closeTable(HTableInterface table) throws TIOError {
     try {
-      htablePool.putTable(table);
+      table.close();
     } catch (IOException e) {
       throw getTIOError(e);
     }
@@ -63,7 +63,6 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
    * Assigns a unique ID to the scanner and adds the mapping to an internal HashMap.
    * 
    * @param scanner to add
-   * 
    * @return Id for this Scanner
    */
   private int addScanner(ResultScanner scanner) {
@@ -76,7 +75,6 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
    * Returns the Scanner associated with the specified Id.
    * 
    * @param id of the Scanner to get
-   * 
    * @return a Scanner, or null if the Id is invalid
    */
   private ResultScanner getScanner(int id) {
@@ -87,7 +85,6 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
    * Removes the scanner associated with the specified ID from the internal HashMap.
    * 
    * @param id of the Scanner to remove
-   * 
    * @return the removed Scanner, or <code>null</code> if the Id is invalid
    */
   protected ResultScanner removeScanner(int id) {
@@ -102,7 +99,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -114,7 +111,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -126,7 +123,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -138,7 +135,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -150,20 +147,20 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
   @Override
-  public boolean checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier,
-                             ByteBuffer value, TPut put) throws TIOError, TException {
+  public boolean checkAndPut(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value, TPut put)
+    throws TIOError, TException {
     HTableInterface htable = getTable(table.array());
     try {
       return htable.checkAndPut(row.array(), family.array(), qualifier.array(), (value == null) ? null : value.array(), putFromThrift(put));
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -175,7 +172,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -187,7 +184,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -200,28 +197,26 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
     return deletesFromHBase(tempDeletes);
   }
 
   @Override
-  public boolean checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier,
-                                ByteBuffer value, TDelete deleteSingle) throws TIOError, TException {
+  public boolean checkAndDelete(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier, ByteBuffer value,
+      TDelete deleteSingle) throws TIOError, TException {
     HTableInterface htable = getTable(table.array());
 
     try {
       if (value == null) {
-        return htable.checkAndDelete(row.array(), family.array(), qualifier.array(), null,
-            deleteFromThrift(deleteSingle));
+        return htable.checkAndDelete(row.array(), family.array(), qualifier.array(), null, deleteFromThrift(deleteSingle));
       } else {
-        return htable.checkAndDelete(row.array(), family.array(), qualifier.array(), value.array(),
-            deleteFromThrift(deleteSingle));
+        return htable.checkAndDelete(row.array(), family.array(), qualifier.array(), value.array(), deleteFromThrift(deleteSingle));
       }
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -233,7 +228,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
   }
 
@@ -246,7 +241,7 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
     } catch (IOException e) {
       throw getTIOError(e);
     } finally {
-      putTable(htable);
+      closeTable(htable);
     }
     return addScanner(resultScanner);
   }
