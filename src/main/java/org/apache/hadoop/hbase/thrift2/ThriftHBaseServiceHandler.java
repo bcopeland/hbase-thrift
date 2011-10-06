@@ -226,19 +226,6 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
   }
 
   @Override
-  public long incrementColumnValue(ByteBuffer table, ByteBuffer row, ByteBuffer family, ByteBuffer qualifier,
-                                   long amount, boolean writeToWal) throws TIOError, TException {
-    HTableInterface htable = getTable(table.array());
-    try {
-      return htable.incrementColumnValue(row.array(), family.array(), qualifier.array(), amount, writeToWal);
-    } catch (IOException e) {
-      throw getTIOError(e);
-    } finally {
-      putTable(htable);
-    }
-  }
-
-  @Override
   public TResult increment(ByteBuffer table, TIncrement increment) throws TIOError, TException {
     HTableInterface htable = getTable(table.array());
     try {

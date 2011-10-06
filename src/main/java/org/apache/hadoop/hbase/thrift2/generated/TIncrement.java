@@ -20,6 +20,12 @@ import java.util.Arrays;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Used to perform Increment operations for a single row.
+ * 
+ * You can specify if this Increment should be written
+ * to the write-ahead Log (WAL) or not. It defaults to true.
+ */
 public class TIncrement implements org.apache.thrift.TBase<TIncrement, TIncrement._Fields>, java.io.Serializable, Cloneable {
   private static final org.apache.thrift.protocol.TStruct STRUCT_DESC = new org.apache.thrift.protocol.TStruct("TIncrement");
 

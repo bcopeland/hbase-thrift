@@ -28,7 +28,7 @@ import org.slf4j.LoggerFactory;
  * don't have one. If you don't provide a default timestamp
  * the current time is inserted.
  * 
- * You can also define it this Put should be written
+ * You can also specify if this Put should be written
  * to the write-ahead Log (WAL) or not. It defaults to true.
  */
 public class TPut implements org.apache.thrift.TBase<TPut, TPut._Fields>, java.io.Serializable, Cloneable {

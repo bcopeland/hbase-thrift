@@ -24,7 +24,6 @@ namespace rb Apache.Hadoop.Hbase.Thrift2
 namespace py hbase
 namespace perl Hbase
 
-
 struct TTimeRange {
   1: required i64 minStamp,
   2: required i64 maxStamp
@@ -101,7 +100,7 @@ struct TGet {
  * don't have one. If you don't provide a default timestamp
  * the current time is inserted.
  *
- * You can also define it this Put should be written
+ * You can also specify if this Put should be written
  * to the write-ahead Log (WAL) or not. It defaults to true.
  */
 struct TPut {
@@ -140,6 +139,12 @@ struct TDelete {
   3: optional i64 timestamp
 }
 
+/**
+ * Used to perform Increment operations for a single row.
+ * 
+ * You can specify if this Increment should be written
+ * to the write-ahead Log (WAL) or not. It defaults to true.
+ */
 struct TIncrement {
   1: required binary row,
   2: required list<TColumnIncrement> columns,
@@ -350,29 +355,6 @@ service THBaseService {
 
     /** the TDelete to execute if the check succeeds */
     6: required TDelete deleteSingle
-  ) throws (1: TIOError io)
-
-  /**
-   * Atomically increments a single column by a user provided amount.
-   */
-  i64 incrementColumnValue(
-    /** the table to increment the value on */
-    1: required binary table,
-
-    /** the row where the value should be incremented */
-    2: required binary row,
-
-    /** the family in the row where the value should be incremented */
-    3: required binary family,
-
-    /** the column qualifier where the value should be incremented */
-    4: required binary qualifier,
-
-    /** the amount by which the value should be incremented */
-    5: i64 amount = 1,
-
-    /** if this increment should be written to the WAL or not */
-    6: bool writeToWal = 1
   ) throws (1: TIOError io)
   
   TResult increment(
