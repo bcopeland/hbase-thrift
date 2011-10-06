@@ -128,18 +128,6 @@ public class ThriftHBaseServiceHandler implements THBaseService.Iface {
   }
 
   @Override
-  public TResult getRowOrBefore(ByteBuffer table, ByteBuffer row, ByteBuffer family) throws TIOError, TException {
-    HTableInterface htable = getTable(table.array());
-    try {
-      return resultFromHBase(htable.getRowOrBefore(row.array(), family.array()));
-    } catch (IOException e) {
-      throw getTIOError(e);
-    } finally {
-      closeTable(htable);
-    }
-  }
-
-  @Override
   public void put(ByteBuffer table, TPut put) throws TIOError, TException {
     HTableInterface htable = getTable(table.array());
     try {

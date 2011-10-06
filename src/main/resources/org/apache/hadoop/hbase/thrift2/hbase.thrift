@@ -236,21 +236,6 @@ service THBaseService {
   ) throws (1: TIOError io)
 
   /**
-   * Return the row that matches <i>row</i> exactly,
-   * or the one that immediately precedes it.
-   */
-  TResult getRowOrBefore(
-    /** the table to get from */
-    1: required binary table,
-
-    /** the row key to get or the one preceding it */
-    2: required binary row,
-
-    /** the column family to get */
-    3: required binary family
-  ) throws (1: TIOError io)
-
-  /**
    * Commit a TPut to a table.
    */
   void put(
