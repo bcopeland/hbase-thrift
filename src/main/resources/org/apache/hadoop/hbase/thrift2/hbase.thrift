@@ -68,6 +68,16 @@ struct TResult {
 }
 
 /**
+ * Specify type of delete:
+ *  - DELETE_COLUMN means exactly one version will be removed,
+ *  - DELETE_COLUMNS means previous versions will also be removed.
+ */
+enum TDeleteType {
+  DELETE_COLUMN = 0,
+  DELETE_COLUMNS = 1
+}
+
+/**
  * Used to perform Get operations on a single row.
  *
  * The scope can be further narrowed down by specifying a list of
@@ -124,19 +134,20 @@ struct TPut {
  * Specifying a family and a column qualifier in a TColumn will delete only
  * this qualifier. If a timestamp is specified only versions equal
  * to this timestamp will be deleted. If no timestamp is specified the
- * most recent version will be deleted.
+ * most recent version will be deleted.  To delete all previous versions,
+ * specify the DELETE_COLUMNS TDeleteType.
  *
  * The top level timestamp is only used if a complete row should be deleted
  * (i.e. no columns are passed) and if it is specified it works the same way
  * as if you had added a TColumn for every column family and this timestamp
  * (i.e. all versions older than or equal in all column families will be deleted)
  *
- * TODO: This is missing the KeyValue.Type.DeleteColumn semantic. I could add a DeleteType or something like that
  */
 struct TDelete {
   1: required binary row,
   2: optional list<TColumn> columns
   3: optional i64 timestamp
+  4: optional TDeleteType deleteType
 }
 
 /**

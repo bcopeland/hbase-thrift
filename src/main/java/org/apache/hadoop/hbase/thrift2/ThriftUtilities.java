@@ -198,9 +198,17 @@ public class ThriftUtilities {
       for (TColumn column : in.getColumns()) {
         if (column.isSetQualifier()) {
           if (column.isSetTimestamp()) {
-            out.deleteColumn(column.getFamily(), column.getQualifier(), column.getTimestamp());
+            if (in.isSetDeleteType() &&
+                in.getDeleteType().equals(TDeleteType.DELETE_COLUMNS))
+              out.deleteColumns(column.getFamily(), column.getQualifier(), column.getTimestamp());
+            else
+              out.deleteColumn(column.getFamily(), column.getQualifier(), column.getTimestamp());
           } else {
-            out.deleteColumn(column.getFamily(), column.getQualifier());
+            if (in.isSetDeleteType() &&
+                in.getDeleteType().equals(TDeleteType.DELETE_COLUMNS))
+              out.deleteColumns(column.getFamily(), column.getQualifier());
+            else
+              out.deleteColumn(column.getFamily(), column.getQualifier());
           }
 
         } else {

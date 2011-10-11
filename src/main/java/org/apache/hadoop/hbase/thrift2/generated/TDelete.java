@@ -34,14 +34,14 @@ import org.slf4j.LoggerFactory;
  * Specifying a family and a column qualifier in a TColumn will delete only
  * this qualifier. If a timestamp is specified only versions equal
  * to this timestamp will be deleted. If no timestamp is specified the
- * most recent version will be deleted.
+ * most recent version will be deleted.  To delete all previous versions,
+ * specify the DELETE_COLUMNS TDeleteType.
  * 
  * The top level timestamp is only used if a complete row should be deleted
  * (i.e. no columns are passed) and if it is specified it works the same way
  * as if you had added a TColumn for every column family and this timestamp
  * (i.e. all versions older than or equal in all column families will be deleted)
  * 
- * TODO: This is missing the KeyValue.Type.DeleteColumn semantic. I could add a DeleteType or something like that
  */
 public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields>, java.io.Serializable, Cloneable {
   private static final org.apache.thrift.protocol.TStruct STRUCT_DESC = new org.apache.thrift.protocol.TStruct("TDelete");
@@ -49,16 +49,27 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
   private static final org.apache.thrift.protocol.TField ROW_FIELD_DESC = new org.apache.thrift.protocol.TField("row", org.apache.thrift.protocol.TType.STRING, (short)1);
   private static final org.apache.thrift.protocol.TField COLUMNS_FIELD_DESC = new org.apache.thrift.protocol.TField("columns", org.apache.thrift.protocol.TType.LIST, (short)2);
   private static final org.apache.thrift.protocol.TField TIMESTAMP_FIELD_DESC = new org.apache.thrift.protocol.TField("timestamp", org.apache.thrift.protocol.TType.I64, (short)3);
+  private static final org.apache.thrift.protocol.TField DELETE_TYPE_FIELD_DESC = new org.apache.thrift.protocol.TField("deleteType", org.apache.thrift.protocol.TType.I32, (short)4);
 
   public ByteBuffer row; // required
   public List<TColumn> columns; // required
   public long timestamp; // required
+  /**
+   * 
+   * @see TDeleteType
+   */
+  public TDeleteType deleteType; // required
 
   /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
   public enum _Fields implements org.apache.thrift.TFieldIdEnum {
     ROW((short)1, "row"),
     COLUMNS((short)2, "columns"),
-    TIMESTAMP((short)3, "timestamp");
+    TIMESTAMP((short)3, "timestamp"),
+    /**
+     * 
+     * @see TDeleteType
+     */
+    DELETE_TYPE((short)4, "deleteType");
 
     private static final Map<String, _Fields> byName = new HashMap<String, _Fields>();
 
@@ -79,6 +90,8 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
           return COLUMNS;
         case 3: // TIMESTAMP
           return TIMESTAMP;
+        case 4: // DELETE_TYPE
+          return DELETE_TYPE;
         default:
           return null;
       }
@@ -132,6 +145,8 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
             new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TColumn.class))));
     tmpMap.put(_Fields.TIMESTAMP, new org.apache.thrift.meta_data.FieldMetaData("timestamp", org.apache.thrift.TFieldRequirementType.OPTIONAL, 
         new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.I64)));
+    tmpMap.put(_Fields.DELETE_TYPE, new org.apache.thrift.meta_data.FieldMetaData("deleteType", org.apache.thrift.TFieldRequirementType.OPTIONAL, 
+        new org.apache.thrift.meta_data.EnumMetaData(org.apache.thrift.protocol.TType.ENUM, TDeleteType.class)));
     metaDataMap = Collections.unmodifiableMap(tmpMap);
     org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(TDelete.class, metaDataMap);
   }
@@ -164,6 +179,9 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
       this.columns = __this__columns;
     }
     this.timestamp = other.timestamp;
+    if (other.isSetDeleteType()) {
+      this.deleteType = other.deleteType;
+    }
   }
 
   public TDelete deepCopy() {
@@ -176,6 +194,7 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
     this.columns = null;
     setTimestampIsSet(false);
     this.timestamp = 0;
+    this.deleteType = null;
   }
 
   public byte[] getRow() {
@@ -274,6 +293,38 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
     __isset_bit_vector.set(__TIMESTAMP_ISSET_ID, value);
   }
 
+  /**
+   * 
+   * @see TDeleteType
+   */
+  public TDeleteType getDeleteType() {
+    return this.deleteType;
+  }
+
+  /**
+   * 
+   * @see TDeleteType
+   */
+  public TDelete setDeleteType(TDeleteType deleteType) {
+    this.deleteType = deleteType;
+    return this;
+  }
+
+  public void unsetDeleteType() {
+    this.deleteType = null;
+  }
+
+  /** Returns true if field deleteType is set (has been assigned a value) and false otherwise */
+  public boolean isSetDeleteType() {
+    return this.deleteType != null;
+  }
+
+  public void setDeleteTypeIsSet(boolean value) {
+    if (!value) {
+      this.deleteType = null;
+    }
+  }
+
   public void setFieldValue(_Fields field, Object value) {
     switch (field) {
     case ROW:
@@ -300,6 +351,14 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
       }
       break;
 
+    case DELETE_TYPE:
+      if (value == null) {
+        unsetDeleteType();
+      } else {
+        setDeleteType((TDeleteType)value);
+      }
+      break;
+
     }
   }
 
@@ -313,6 +372,9 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
 
     case TIMESTAMP:
       return Long.valueOf(getTimestamp());
+
+    case DELETE_TYPE:
+      return getDeleteType();
 
     }
     throw new IllegalStateException();
@@ -331,6 +393,8 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
       return isSetColumns();
     case TIMESTAMP:
       return isSetTimestamp();
+    case DELETE_TYPE:
+      return isSetDeleteType();
     }
     throw new IllegalStateException();
   }
@@ -372,6 +436,15 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
       if (!(this_present_timestamp && that_present_timestamp))
         return false;
       if (this.timestamp != that.timestamp)
+        return false;
+    }
+
+    boolean this_present_deleteType = true && this.isSetDeleteType();
+    boolean that_present_deleteType = true && that.isSetDeleteType();
+    if (this_present_deleteType || that_present_deleteType) {
+      if (!(this_present_deleteType && that_present_deleteType))
+        return false;
+      if (!this.deleteType.equals(that.deleteType))
         return false;
     }
 
@@ -417,6 +490,16 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
     }
     if (isSetTimestamp()) {
       lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.timestamp, typedOther.timestamp);
+      if (lastComparison != 0) {
+        return lastComparison;
+      }
+    }
+    lastComparison = Boolean.valueOf(isSetDeleteType()).compareTo(typedOther.isSetDeleteType());
+    if (lastComparison != 0) {
+      return lastComparison;
+    }
+    if (isSetDeleteType()) {
+      lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.deleteType, typedOther.deleteType);
       if (lastComparison != 0) {
         return lastComparison;
       }
@@ -471,6 +554,13 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
             org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
           }
           break;
+        case 4: // DELETE_TYPE
+          if (field.type == org.apache.thrift.protocol.TType.I32) {
+            this.deleteType = TDeleteType.findByValue(iprot.readI32());
+          } else { 
+            org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
+          }
+          break;
         default:
           org.apache.thrift.protocol.TProtocolUtil.skip(iprot, field.type);
       }
@@ -510,6 +600,13 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
       oprot.writeI64(this.timestamp);
       oprot.writeFieldEnd();
     }
+    if (this.deleteType != null) {
+      if (isSetDeleteType()) {
+        oprot.writeFieldBegin(DELETE_TYPE_FIELD_DESC);
+        oprot.writeI32(this.deleteType.getValue());
+        oprot.writeFieldEnd();
+      }
+    }
     oprot.writeFieldStop();
     oprot.writeStructEnd();
   }
@@ -540,6 +637,16 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
       if (!first) sb.append(", ");
       sb.append("timestamp:");
       sb.append(this.timestamp);
+      first = false;
+    }
+    if (isSetDeleteType()) {
+      if (!first) sb.append(", ");
+      sb.append("deleteType:");
+      if (this.deleteType == null) {
+        sb.append("null");
+      } else {
+        sb.append(this.deleteType);
+      }
       first = false;
     }
     sb.append(")");
