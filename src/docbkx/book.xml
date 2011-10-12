@@ -312,7 +312,7 @@ public static class MyReducer extends TableReducer&lt;Text, IntWritable, Immutab
       <para>A good general introduction on the strength and weaknesses modelling on
           the various non-rdbms datastores is Ian Varleys' Master thesis,
           <link xlink:href="http://ianvarley.com/UT/MR/Varley_MastersReport_Full_2009-08-07.pdf">No Relation: The Mixed Blessings of Non-Relational Databases</link>.
-          Recommended.
+          Recommended.  Also, read <xref linkend="keyvalue"/> for how HBase stores data internally.
       </para>
   <section xml:id="schema.creation">
   <title>
@@ -400,7 +400,7 @@ admin.enableTable(table);
        </para>
        <para>Most of the time small inefficiencies don't matter all that much.  Unfortunately,
          this is a case where they do.  Whatever patterns are selected for ColumnFamilies, attributes, and rowkeys they could be repeated
-       several billion times in your data</para>
+       several billion times in your data.  See <xref linkend="keyvalue"/> for more information on HBase stores data internally.</para>
        <section xml:id="keysize.cf"><title>Column Families</title>
          <para>Try to keep the ColumnFamily names as small as possible, preferably one character (e.g. "d" for data/default).
          </para> 
@@ -590,6 +590,27 @@ admin.enableTable(table);
        Coprocessor Secondary Index
       </title>
       <para>Coprocessors act like RDBMS triggers.  These are currently on TRUNK.
+      </para>
+    </section>
+  </section>
+  <section xml:id="schema.smackdown"><title>Schema Design Smackdown</title>
+    <para>This section will describe common schema design questions that appear on the dist-list.  These are 
+    general guidelines and not laws - each application must consider it's own needs.  
+    </para>
+    <section xml:id="schema.smackdown.rowsversions"><title>Rows vs. Versions</title>
+      <para>A common question is whether one should prefer rows or HBase's built-in-versioning.  The context is typically where there are
+      "a lot" of versions of a row to be retained (e.g., where it is significantly above the HBase default of 3 max versions).  The 
+      rows-approach would require storing a timstamp in some portion of the rowkey so that they would not overwite with each successive update.
+      </para>
+      <para>Winner:  Rows (generally speaking).
+      </para>
+    </section>
+    <section xml:id="schema.smackdown.rowscols"><title>Rows vs. Columns</title>
+      <para>Another common question is whether one should prefer rows or columns.  The context is typically in extreme cases of wide
+      tables, such as having 1 row with 1 million attributes, or 1 million rows with 1 columns apiece.  
+      </para>
+      <para>Winner:  Rows (generally speaking).  To be clear, this guideline is in the context is in extremely wide cases, not in the 
+      standard use-case where one needs to store a few dozen or hundred columns.
       </para>
     </section>
   </section>
@@ -1022,6 +1043,8 @@ long explicitTimeInMs = 555;  // just an example
 put.add(Bytes.toBytes("cf"), Bytes.toBytes("attr1"), explicitTimeInMs, Bytes.toBytes(data));
 htable.put(put);
 </programlisting>
+          Caution:  the version timestamp is internally by HBase for things like time-to-live calculations.  
+          It's usually best to avoid setting the timestamp yourself.
           </para>
           </section>
           
@@ -1121,7 +1144,8 @@ htable.put(put);
 
 	<section xml:id="arch.catalog">
 	 <title>Catalog Tables</title>
-	  <para>
+	  <para>The catalog tables -ROOT- and .META. exist as HBase tables.  They are are filtered out 
+	  of the HBase shell's <code>list</code> command, but they are in fact tables just like any other.
      </para>
 	  <section xml:id="arch.catalog.root">
 	   <title>ROOT</title>
@@ -1612,6 +1636,8 @@ scan.setFilter(filter);
               Schubert Zhang's blog post on <link xlink:ref="http://cloudepr.blogspot.com/2009/09/hfile-block-indexed-file-format-to.html">HFile: A Block-Indexed File Format to Store Sorted Key-Value Pairs</link> makes for a thorough introduction to HBase's hfile.  Matteo Bertozzi has also put up a
               helpful description, <link xlink:href="http://th30z.blogspot.com/2011/02/hbase-io-hfile.html?spref=tw">HBase I/O: HFile</link>.
           </para>
+          <para>For more information, see the <link xlink:href="http://hbase.apache.org/xref/org/apache/hadoop/hbase/io/hfile/HFile.html">HFile source code</link>.
+          </para>
       </section>
 
       <section xml:id="hfile_tool">
@@ -1627,6 +1653,72 @@ scan.setFilter(filter);
         usage for other things to do with the <classname>HFile</classname>
         tool.</para>
       </section>
+      </section>
+      <section xml:id="hfile.blocks">
+        <title>Blocks</title>
+        <para>StoreFiles are composed of blocks.  The blocksize is configured on a per-ColumnFamily basis.
+        </para>
+        <para>For more information, see the <link xlink:href="http://hbase.apache.org/xref/org/apache/hadoop/hbase/io/hfile/HFileBlock.html">HFileBlock source code</link>.
+        </para>
+      </section>
+      <section xml:id="keyvalue">
+        <title>KeyValue</title>
+        <para>The KeyValue class is the heart of data storage in HBase.  KeyValue wraps a byte array and takes offsets and lengths into passed array
+         at where to start interpreting the content as KeyValue.
+        </para>
+        <para>The KeyValue format inside a byte array is:
+           <itemizedlist>
+             <listitem>keylength</listitem>
+             <listitem>valuelength</listitem>
+             <listitem>key</listitem>
+             <listitem>value</listitem>
+           </itemizedlist>
+        </para>
+        <para>The Key is further decomposed as:
+           <itemizedlist>
+             <listitem>rowlength</listitem>
+             <listitem>row (i.e., the rowkey)</listitem>
+             <listitem>columnfamilylength</listitem>
+             <listitem>columnfamily</listitem>
+             <listitem>columnqualifier</listitem>
+             <listitem>timestamp</listitem>
+             <listitem>keytype (e.g., Put, Delete)</listitem>
+           </itemizedlist>
+        </para>
+        <para>For more information, see the <link xlink:href="http://hbase.apache.org/xref/org/apache/hadoop/hbase/KeyValue.html">KeyValue source code</link>.
+        </para>
+        <section xml:id="keyvalue.example"><title>Example</title>
+          <para>To emphasize the points above, examine what happens with two Puts for two different columns for the same row:</para>
+           <itemizedlist>
+             <listitem>Put #1:  <code>rowkey=row1, cf:attr1=value1</code></listitem>
+             <listitem>Put #2:  <code>rowkey=row1, cf:attr2=value2</code></listitem>
+             </itemizedlist>
+          <para>Even though these are for the same row, a KeyValue is created for each column:</para>
+          <para>Key portion for Put #1:
+           <itemizedlist>
+             <listitem>rowlength (4)</listitem>
+             <listitem>row (row1)</listitem>
+             <listitem>columnfamilylength (2)</listitem>
+             <listitem>columnfamily (cf)</listitem>
+             <listitem>columnqualifier (attr1)</listitem>
+             <listitem>timestamp (server time of Put)</listitem>
+             <listitem>keytype (Put)</listitem>
+           </itemizedlist>
+          </para>
+          <para>Key portion for Put #2:
+           <itemizedlist>
+             <listitem>rowlength (4)</listitem>
+             <listitem>row (row1)</listitem>
+             <listitem>columnfamilylength (2)</listitem>
+             <listitem>columnfamily (cf)</listitem>
+             <listitem>columnqualifier (attr2)</listitem>
+             <listitem>timestamp (server time of Put)</listitem>
+             <listitem>keytype (Put)</listitem>
+           </itemizedlist>
+          </para>
+        </section>
+       <para>It is critical to understand that the rowkey, ColumnFamily, and column (aka columnqualifier) are embedded within
+       the KeyValue instance.  The longer these identifiers are, the bigger the KeyValue is.</para>
       </section>
       <section xml:id="compaction">
         <title>Compaction</title>

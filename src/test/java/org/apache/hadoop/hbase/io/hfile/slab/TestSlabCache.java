@@ -28,6 +28,7 @@ import org.apache.hadoop.hbase.io.hfile.slab.SlabCache.SlabStats;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.Ignore;
 
 /**
  * Basic test of SlabCache. Puts and gets.
@@ -58,7 +59,7 @@ public class TestSlabCache {
     cache.shutdown();
   }
 
-  @Test
+  @Ignore @Test
   public void testElementPlacement() {
     assertEquals(cache.getHigherBlock(BLOCK_SIZE).getKey().intValue(),
         (BLOCK_SIZE * 11 / 10));
@@ -66,28 +67,28 @@ public class TestSlabCache {
         .intValue(), (BLOCK_SIZE * 21 / 10));
   }
 
-  @Test
+  @Ignore @Test
   public void testCacheSimple() throws Exception {
     CacheTestUtils.testCacheSimple(cache, BLOCK_SIZE, NUM_QUERIES);
   }
 
-  @Test
+  @Ignore @Test
   public void testCacheMultiThreaded() throws Exception {
     CacheTestUtils.testCacheMultiThreaded(cache, BLOCK_SIZE, NUM_THREADS,
         NUM_QUERIES, 0.80);
   }
 
-  @Test
+  @Ignore @Test
   public void testCacheMultiThreadedSingleKey() throws Exception {
     CacheTestUtils.hammerSingleKey(cache, BLOCK_SIZE, NUM_THREADS, NUM_QUERIES);
   }
 
-  @Test
+  @Ignore @Test
   public void testCacheMultiThreadedEviction() throws Exception {
     CacheTestUtils.hammerEviction(cache, BLOCK_SIZE, 10, NUM_QUERIES);
   }
 
-  @Test
+  @Ignore @Test
   /*Just checks if ranges overlap*/
   public void testStatsArithmetic(){
     SlabStats test = cache.requestStats;
@@ -98,7 +99,7 @@ public class TestSlabCache {
     }
   }
 
-  @Test
+  @Ignore @Test
   public void testHeapSizeChanges(){
     CacheTestUtils.testHeapSizeChanges(cache, BLOCK_SIZE);
   }
