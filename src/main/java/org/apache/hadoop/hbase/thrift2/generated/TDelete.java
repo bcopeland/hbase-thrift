@@ -152,6 +152,8 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
   }
 
   public TDelete() {
+    this.deleteType = org.apache.hadoop.hbase.thrift2.generated.TDeleteType.DELETE_COLUMNS;
+
   }
 
   public TDelete(
@@ -194,7 +196,8 @@ public class TDelete implements org.apache.thrift.TBase<TDelete, TDelete._Fields
     this.columns = null;
     setTimestampIsSet(false);
     this.timestamp = 0;
-    this.deleteType = null;
+    this.deleteType = org.apache.hadoop.hbase.thrift2.generated.TDeleteType.DELETE_COLUMNS;
+
   }
 
   public byte[] getRow() {
